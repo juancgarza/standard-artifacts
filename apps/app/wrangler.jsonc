@@ -1,0 +1,41 @@
+// Deploy config for celld (`celld deploy .` after `vite build`). Alchemy (alchemy.run.ts)
+// owns local dev and Cloudflare deploys; keep the bindings below in sync with it.
+// Only Workers, Durable Objects (SQLite) and static assets are used: the surface
+// celld supports. No D1/R2/KV/cron.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "standard-artifacts",
+  "compatibility_date": "2026-06-01",
+  "main": "src/worker/index.ts",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/mcp"]
+  },
+  "vars": {
+    // "dev" lets requests without a ticket act as a local owner. Never set in production.
+    // Dev mode is localhost-only: the Worker refuses any other Host or Origin with a 403.
+    // DEV_ALLOWED_HOSTS (comma-separated) lets named hosts in, which exposes the workspace
+    // to whoever reaches them. A networked celld deploy needs live mode with sign-in
+    // (AUTH_MODE "live" plus TICKET_SECRET and an account service), which isn't built yet.
+    "AUTH_MODE": "dev"
+    // Optional, for content search: TURBOPUFFER_API_KEY (a secret, not a var), TURBOPUFFER_URL, SEARCH_PREFIX.
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "WORKSPACE", "class_name": "WorkspaceCell" },
+      { "name": "TABLE", "class_name": "TableCell" },
+      { "name": "BOARD", "class_name": "BoardCell" },
+      { "name": "DOC", "class_name": "DocCell" },
+      { "name": "TRACKER", "class_name": "TrackerCell" },
+      { "name": "MCP", "class_name": "McpCell" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["WorkspaceCell"] },
+    { "tag": "v2", "new_sqlite_classes": ["TableCell"] },
+    { "tag": "v3", "new_sqlite_classes": ["BoardCell", "DocCell"] },
+    { "tag": "v4", "new_sqlite_classes": ["McpCell"] },
+    { "tag": "v5", "new_sqlite_classes": ["TrackerCell"] }
+  ]
+}

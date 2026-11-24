@@ -1,0 +1,48 @@
+{
+  "name": "@standard-artifacts/app",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "alchemy dev",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.web.json && tsc -p tsconfig.node.json"
+  },
+  "dependencies": {
+    "@standard-artifacts/protocol": "workspace:*",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@phosphor-icons/react": "^2.1.10",
+    "@tanstack/react-router": "^1.170.17",
+    "effect": "~4.0.7",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "@standard-artifacts/room": "workspace:*",
+    "@standard-artifacts/table": "workspace:*",
+    "@standard-artifacts/board": "workspace:*",
+    "@standard-artifacts/doc": "workspace:*",
+    "@standard-artifacts/client": "workspace:*",
+    "@standard-artifacts/mcp": "workspace:*",
+    "@standard-artifacts/tracker": "workspace:*"
+  },
+  "devDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.84",
+    "@alchemy.run/domain": "2.0.0-beta.84",
+    "@alchemy.run/frontend-frameworks": "2.0.0-beta.84",
+    "@cloudflare/workers-types": "^5.20261102.1",
+    "@effect/platform-node": "~4.0.7",
+    "@tailwindcss/vite": "^4.3.2",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "alchemy": "2.0.0-beta.84",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.4"
+  },
+  "engines": {
+    "node": ">=24.11.1"
+  }
+}

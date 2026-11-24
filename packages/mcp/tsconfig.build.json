@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.build.json",
+  // Compile against the published shape of sibling packages (their built .d.ts), not their src.
+  "compilerOptions": {
+    "paths": {
+      "@standard-artifacts/protocol": ["../protocol/dist/index.d.ts"],
+      "@standard-artifacts/client": ["../client/dist/index.d.ts"]
+    }
+  }
+}

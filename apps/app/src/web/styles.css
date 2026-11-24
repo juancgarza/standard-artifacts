@@ -1,0 +1,151 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/* Component packages use these same tokens. */
+@source "../../../../packages";
+
+/* <html data-theme> is always light or dark: the person's choice, or the system's (see theme.ts). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --bg: #ffffff;
+  --surface: #f7f7f5;
+  --hover: #ececea;
+  --active: #e4e4e1;
+  --border: #e6e6e3;
+  --text: #1f1f1d;
+  --muted: #73736e;
+  --faint: #a3a39e;
+  --accent: #2f6fed;
+  --accent-text: #ffffff;
+  --danger: #d0362b;
+  --board: #b45be0;
+  --tracker: #e0692a;
+  --table: #1e9e6a;
+  --doc: #2f6fed;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #191918;
+  --surface: #202020;
+  --hover: #2a2a29;
+  --active: #323231;
+  --border: #2e2e2d;
+  --text: #ececea;
+  --muted: #9b9b96;
+  --faint: #6b6b67;
+  --accent: #5b8ff5;
+  --accent-text: #ffffff;
+  --danger: #ef5d52;
+  --board: #c98af0;
+  --tracker: #f08b52;
+  --table: #3fc08c;
+  --doc: #6c9cf7;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-danger: var(--danger);
+  --color-board: var(--board);
+  --color-tracker: var(--tracker);
+  --color-table: var(--table);
+  --color-doc: var(--doc);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Home + navigation additions */
+:root {
+  --star: #e5a400;
+}
+
+:root[data-theme="dark"] {
+  --star: #f2c14e;
+}
+
+@theme inline {
+  --color-star: var(--star);
+}
+
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+}
+
+.palette-in {
+  animation: palette-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+/* A tab that opened behind the current page, or that a link pointed at: "it's over here". */
+@keyframes tab-flash {
+  from {
+    background-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+}
+
+.tab-flash {
+  animation: tab-flash 700ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-in,
+  .tab-flash {
+    animation: none;
+  }
+}
+
+/*
+ * The desktop app on a Mac draws the window's controls over the page: the 36px band
+ * across the top is the tab strip's height, and it's what drags the window. Tabs and
+ * buttons opt out, or they'd drag the window instead of being pressed.
+ */
+[data-desktop="darwin"] nav[aria-label="Workspace"]::before {
+  content: "";
+  flex: none;
+  height: 36px;
+  -webkit-app-region: drag;
+}
+[data-desktop="darwin"] nav[aria-label="Workspace"] > :first-child {
+  padding-top: 0;
+}
+[data-desktop] [data-tab-strip] {
+  -webkit-app-region: drag;
+}
+[data-desktop] [data-tab-strip] :is([role="tab"], button) {
+  -webkit-app-region: no-drag;
+}
+/* With the sidebar away the strip starts at the window's edge, under the controls. */
+[data-desktop="darwin"]:has([data-sidebar="collapsed"]) [data-tab-strip] {
+  padding-left: 76px;
+}
+/* A share link has no tabs, but the window still needs its band. */
+[data-desktop="darwin"] [data-tab-strip="closed"] {
+  height: 36px;
+}

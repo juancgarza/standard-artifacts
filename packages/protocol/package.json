@@ -1,0 +1,32 @@
+{
+  "name": "@standard-artifacts/protocol",
+  "version": "0.1.1",
+  "description": "Effect Schema contract for Standard Artifacts: artifacts, tables, boards, docs, trackers, the room wire protocol and the HTTP API.",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/juancgarza/standard-artifacts.git", "directory": "packages/protocol" },
+  "homepage": "https://standardartifacts.com",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": ["dist", "LICENSE", "README.md"],
+  "engines": { "node": ">=22" },
+  "publishConfig": {
+    "access": "public",
+    "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
+    "typecheck": "tsc -p ."
+  },
+  "peerDependencies": {
+    "effect": "^4.0.7"
+  },
+  "devDependencies": {
+    "effect": "~4.0.7",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@standard-artifacts/mcp",
+  "version": "0.1.1",
+  "description": "Transport-agnostic MCP tools and stdartifacts:// resources for Standard Artifacts, built on Effect AI.",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/juancgarza/standard-artifacts.git", "directory": "packages/mcp" },
+  "homepage": "https://standardartifacts.com",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "files": ["dist", "LICENSE", "README.md"],
+  "engines": { "node": ">=22" },
+  "publishConfig": {
+    "access": "public",
+    "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "pnpm --filter @standard-artifacts/mcp... run build",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": { "@standard-artifacts/client": "workspace:^", "@standard-artifacts/protocol": "workspace:^" },
+  "peerDependencies": { "effect": "^4.0.7" },
+  "devDependencies": { "effect": "~4.0.7", "typescript": "^6.0.3" }
+}

@@ -1,0 +1,14 @@
+packages:
+  - apps/*
+  - packages/*
+  - tests
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - workerd
+  - sharp
+overrides:
+  # alchemy 2.0.0-beta.84 imports effect/Crypto, which effect 4.1 removed.
+  effect: ~4.0.7
+  "@effect/platform-node": ~4.0.7
+  "@effect/platform-node-shared": ~4.0.7

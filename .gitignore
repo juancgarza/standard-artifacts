@@ -1,0 +1,13 @@
+node_modules
+dist
+release
+.wrangler
+.dev.vars
+worker-configuration.d.ts
+*.log
+.DS_Store
+.alchemy
+.env
+.env.*
+.test-app.log
+.claude/worktrees

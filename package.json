@@ -1,0 +1,16 @@
+{
+  "name": "standard-artifacts",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@10.18.3",
+  "scripts": {
+    "dev": "pnpm --filter @standard-artifacts/app dev",
+    "build": "pnpm --filter @standard-artifacts/app build",
+    "landing": "pnpm --filter @standard-artifacts/landing dev",
+    "typecheck": "pnpm -r typecheck",
+    "cli": "pnpm --filter stdartifacts build",
+    "test": "scripts/test.sh",
+    "pack-check": "node scripts/pack-check.mjs"
+  }
+}

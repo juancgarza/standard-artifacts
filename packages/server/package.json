@@ -1,0 +1,45 @@
+{
+  "name": "@standard-artifacts/server",
+  "version": "0.1.1",
+  "description": "Run Standard Artifacts on your own machine: the app's Worker and web UI on Miniflare, no Cloudflare account.",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juancgarza/standard-artifacts.git",
+    "directory": "packages/server"
+  },
+  "homepage": "https://standardartifacts.com",
+  "type": "module",
+  "bin": {
+    "standard-artifacts-server": "./dist/bin.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.ts",
+    "prepack": "node scripts/build.ts",
+    "typecheck": "tsc -p .",
+    "test": "node --test --test-force-exit --test-reporter=spec test/*.test.ts"
+  },
+  "dependencies": {
+    "miniflare": "4.20260730.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "esbuild": "^0.25.12",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

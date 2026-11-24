@@ -1,0 +1,190 @@
+{
+  "scene-day": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      800,
+      1200,
+      1536
+    ]
+  },
+  "scene-dusk": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      800,
+      1200,
+      1536
+    ]
+  },
+  "close-day": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      800,
+      1200,
+      1536
+    ]
+  },
+  "close-dusk": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      800,
+      1200,
+      1536
+    ]
+  },
+  "plate-table-day": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      480,
+      800,
+      1200
+    ]
+  },
+  "plate-table-dusk": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      480,
+      800,
+      1200
+    ]
+  },
+  "shot-table-day": {
+    "width": 2560,
+    "height": 1630,
+    "widths": [
+      640,
+      960,
+      1440,
+      1920
+    ]
+  },
+  "shot-table-dusk": {
+    "width": 2560,
+    "height": 1630,
+    "widths": [
+      640,
+      960,
+      1440,
+      1920
+    ]
+  },
+  "plate-board-day": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      480,
+      800,
+      1200
+    ]
+  },
+  "plate-board-dusk": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      480,
+      800,
+      1200
+    ]
+  },
+  "shot-board-day": {
+    "width": 2560,
+    "height": 1630,
+    "widths": [
+      640,
+      960,
+      1440,
+      1920
+    ]
+  },
+  "shot-board-dusk": {
+    "width": 2560,
+    "height": 1630,
+    "widths": [
+      640,
+      960,
+      1440,
+      1920
+    ]
+  },
+  "plate-doc-day": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      480,
+      800,
+      1200
+    ]
+  },
+  "plate-doc-dusk": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      480,
+      800,
+      1200
+    ]
+  },
+  "shot-doc-day": {
+    "width": 2560,
+    "height": 1630,
+    "widths": [
+      640,
+      960,
+      1440,
+      1920
+    ]
+  },
+  "shot-doc-dusk": {
+    "width": 2560,
+    "height": 1630,
+    "widths": [
+      640,
+      960,
+      1440,
+      1920
+    ]
+  },
+  "plate-tracker-day": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      480,
+      800,
+      1200
+    ]
+  },
+  "plate-tracker-dusk": {
+    "width": 1536,
+    "height": 1024,
+    "widths": [
+      480,
+      800,
+      1200
+    ]
+  },
+  "shot-tracker-day": {
+    "width": 2560,
+    "height": 1630,
+    "widths": [
+      640,
+      960,
+      1440,
+      1920
+    ]
+  },
+  "shot-tracker-dusk": {
+    "width": 2560,
+    "height": 1630,
+    "widths": [
+      640,
+      960,
+      1440,
+      1920
+    ]
+  }
+}

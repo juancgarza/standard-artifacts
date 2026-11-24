@@ -1,0 +1,2 @@
+# Secret shared with the account service; cells verify ticket HMACs with it.
+TICKET_SECRET=change-me

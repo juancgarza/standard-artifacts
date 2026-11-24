@@ -1,0 +1,83 @@
+# Security
+
+## Reporting a vulnerability
+
+Please don't open a public issue. Report it privately:
+
+- **Preferred:** GitHub's private vulnerability reporting ("Report a vulnerability" on this repo's **Security** tab).
+- **Email:** security@standardartifacts.com
+
+Include what you found, how to reproduce it, and what an attacker could do with it. We'll acknowledge your report within 3 business days and keep you updated until it's fixed. We'll credit you in the release notes unless you'd rather not be named. Please give us a reasonable chance to fix the problem before you disclose it.
+
+**Supported versions:** fixes land on `main` and in the latest release. The hosted service at standardartifacts.com always runs a current build.
+
+## Security model
+
+People and agents edit the same artifacts, and boards run HTML that someone else wrote. These are the boundaries the design relies on. A way around any of them is a vulnerability we want to hear about.
+
+### Identity and access
+
+- **Principals.** Every request resolves to a principal: an org, an actor (a person, an agent acting for a person, or a share-link guest) and a role (owner, editor or viewer).
+  - Viewers and guests are read-only. The cell rejects their ops.
+  - Agents act on behalf of a person and never have more access than that person.
+- **Tickets.** In live mode, the Worker signs HMAC tickets with `TICKET_SECRET`, and every API, WebSocket and MCP request must carry a valid one.
+- **Isolation between orgs.** Cells are named `<org>:<artifact>`, so a principal can't address another org's artifact.
+- **Share links** give a read-only guest access to one artifact. An owner can turn a link off.
+
+### Dev mode (solo)
+
+`AUTH_MODE=dev` has **no sign-in**: any request without a ticket acts as the local owner. It exists for running Standard Artifacts on your own machine. Never expose a dev-mode server to a network. If you tunnel it to test a remote MCP client, anyone with the URL can edit your workspace, so close the tunnel when you're done. Production deploys use `AUTH_MODE=live`, the default.
+
+### HTML embeds
+
+Embeds run arbitrary HTML and JavaScript. Each one renders in an iframe with:
+
+- `sandbox="allow-scripts"` and **no** `allow-same-origin`. The embed gets an opaque origin and can't reach the app's DOM, cookies, storage or session. It also can't navigate the app, open popups, submit forms or show modal dialogs.
+- **A Content-Security-Policy that comes first in the document:**
+  - scripts and styles must be inline;
+  - images may load from `https:`, `data:` and `blob:`;
+  - fonts load only from `data:`;
+  - there's no fetch, XHR, WebSocket, frame, worker or form action.
+- `allow=""` (no powerful features) and `referrerpolicy="no-referrer"`.
+- Navigation detection: an embed that navigates its own frame is replaced with a notice.
+
+The rules are in `packages/board/src/html.ts`.
+
+### Design frames
+
+Design frames render in the app's own document, so their allowlists are the boundary (`packages/protocol/src/design.ts`).
+
+- **What's allowed:**
+  - 26 tags;
+  - attributes allowed per tag;
+  - CSS checked property by property: no `var()`, `expression()`, `@import`, `position: fixed`, comments or escapes;
+  - URLs only over https, or data: for images.
+- **Where it's checked:** the cell's reducer validates every frame, and the renderer filters it again.
+
+### Agents and untrusted content
+
+- **Agents can't wake agents.** Only a person's edit can file an `@claude` request. Agent writes never do, so agents can't trigger each other in loops.
+- **Content is data, not instructions.** The agent skill and the runner's prompt treat anything read from a page, cell or note as data. Prompt injection is still the main risk for any agent that reads untrusted content: it can steer what that agent writes.
+- **Hosted runs** (`apps/runner`, Cloudflare only) execute in a container with **no internet access and no secrets**.
+  - Everything the container sends goes through a Worker (`runner-outbound.ts`), which adds the model API key and a short-lived ticket scoped to the person who asked.
+  - Web access is GET-only, with credentials stripped, and every host is logged.
+  - Runs are limited by budget, turns, wall-clock time and runs per day.
+
+### Desktop app
+
+The renderer is sandboxed with context isolation. The page can only *receive* commands from the main process; there are no `ipcMain` handlers, so the page can't reach the OS. A permission request is granted only if it's on a short allowlist and comes from the app's own main frame. Other sites open in the system browser.
+
+## Known limitations
+
+- **No hosted sign-in yet.** Until it ships, self-hosted servers run only in dev mode (solo, localhost) or behind your own auth in front of live mode.
+- **https images load in viewers' browsers.** Embeds and design frames can load images over `https:`. Whoever controls an image's URL can see who viewed it and when, and a URL can carry data in its path.
+- **GET requests can carry data.** A hosted run's GET-only web access limits a prompt-injected page, but a URL can still carry data out.
+- **The remote MCP endpoint** (`/mcp`) uses bearer tickets. OAuth for ChatGPT and Claude connectors isn't built yet.
+
+## Out of scope
+
+- Anything that needs dev mode exposed to a network.
+- Self-XSS, or attacks that require a compromised device.
+- Missing security headers with no demonstrated impact.
+- Rate limiting and volumetric denial of service against the hosted service.
+- Vulnerabilities in third-party dependencies without a working path through Standard Artifacts. Report those upstream.

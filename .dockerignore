@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.alchemy
+**/.wrangler
+**/.env
+**/.env.*
+**/.dev.vars
+.git
+.claude
+*.log

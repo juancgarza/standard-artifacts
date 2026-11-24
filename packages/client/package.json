@@ -1,0 +1,26 @@
+{
+  "name": "@standard-artifacts/client",
+  "version": "0.1.1",
+  "description": "Typed Effect client for the Standard Artifacts HTTP API, with helpers that speak in names and markdown instead of raw ops.",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/juancgarza/standard-artifacts.git", "directory": "packages/client" },
+  "homepage": "https://standardartifacts.com",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "files": ["dist", "LICENSE", "README.md"],
+  "engines": { "node": ">=22" },
+  "publishConfig": {
+    "access": "public",
+    "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "pnpm --filter @standard-artifacts/client... run build",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": { "@standard-artifacts/protocol": "workspace:^" },
+  "peerDependencies": { "effect": "^4.0.7" },
+  "devDependencies": { "effect": "~4.0.7", "typescript": "^6.0.3" }
+}

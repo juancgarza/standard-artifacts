@@ -1,0 +1,11 @@
+{
+  "name": "@standard-artifacts/room",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./react": "./src/react.ts", "./brands": "./src/brands.tsx" },
+  "scripts": { "typecheck": "tsc -p ." },
+  "dependencies": { "@standard-artifacts/protocol": "workspace:*", "effect": "~4.0.7" },
+  "peerDependencies": { "react": "^19.0.0" },
+  "devDependencies": { "@types/react": "^19.2.17", "typescript": "^6.0.3" }
+}

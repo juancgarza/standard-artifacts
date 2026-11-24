@@ -1,0 +1,15 @@
+{
+  // Emits dist/ (ESM .js + .d.ts) for the packages published to npm. Workspace consumers
+  // keep resolving src/ through `exports`; `publishConfig` points the tarball at dist/.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "${configDir}/src",
+    "outDir": "${configDir}/dist",
+    "lib": ["ES2022", "DOM"],
+    "types": []
+  },
+  "include": ["${configDir}/src"]
+}

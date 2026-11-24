@@ -1,0 +1,23 @@
+{
+  "name": "@standard-artifacts/landing",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p .",
+    "images": "node scripts/optimize-images.mjs",
+    "og": "node scripts/og-image.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "sharp": "^0.35.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.4"
+  },
+  "engines": {
+    "node": ">=24.11.1"
+  }
+}

@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Standard Artifacts: open-source artifacts for you and your agents</title>
+<meta name="description" content="Tables, docs, boards and issue trackers that you and your agents edit together, live. Like ChatGPT Spaces or Claude's artifacts, but open source, multiplayer, and running on your own machine.">
+<link rel="canonical" href="%SITE_URL%/">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1219">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Standard Artifacts">
+<meta property="og:url" content="%SITE_URL%/">
+<meta property="og:title" content="Standard Artifacts: open-source artifacts for you and your agents">
+<meta property="og:description" content="Tables, docs, boards and issue trackers that you and your agents edit together, live. Open source, multiplayer, and running on your own machine.">
+<meta property="og:image" content="%SITE_URL%/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A person and two small robots hand in hand under a sunset sky, with the words: Open-source artifacts you and your agents work on together.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Standard Artifacts: open-source artifacts for you and your agents">
+<meta name="twitter:description" content="Tables, docs, boards and issue trackers that you and your agents edit together, live. Open source, multiplayer, and running on your own machine.">
+<meta name="twitter:image" content="%SITE_URL%/og.jpg">
+<link rel="icon" type="image/svg+xml" href="/src/logo.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<script><!-- include src/head-inline.js --></script>
+<link rel="stylesheet" href="/src/styles.css">
+<script type="module" src="/src/main.ts"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+
+<header class="side">
+  <a class="logo" href="#top"><!-- include src/logo.svg --><span class="logo-name">Standard Artifacts</span></a>
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Menu">
+    <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
+  <div class="side-nav" id="site-nav">
+    <nav aria-label="Page sections">
+      <p class="nav-h" id="nav-product">Product</p>
+      <ul aria-labelledby="nav-product">
+        <li><a href="#top" data-spy="top">Overview</a></li>
+        <li><a href="#runs" data-spy="runs">Runs</a></li>
+        <li><a href="#connect" data-spy="connect">Connect</a></li>
+        <li><a href="#plans" data-spy="plans">Solo or Cloud</a></li>
+        <li><a href="#faq" data-spy="faq">FAQ</a></li>
+      </ul>
+      <p class="nav-h" id="nav-surfaces">Surfaces</p>
+      <ul aria-labelledby="nav-surfaces">
+        <li><a href="#tables"><span class="dot" style="background:var(--table)"></span>Tables</a></li>
+        <li><a href="#boards"><span class="dot" style="background:var(--board)"></span>Boards</a></li>
+        <li><a href="#docs"><span class="dot" style="background:var(--doc)"></span>Docs</a></li>
+        <li><a href="#trackers"><span class="dot" style="background:var(--tracker)"></span>Trackers</a></li>
+      </ul>
+      <p class="nav-h" id="nav-developers">Developers</p>
+      <ul aria-labelledby="nav-developers">
+        <li><a href="#connect">MCP tools</a></li>
+        <li><a href="%GITHUB_URL%">GitHub</a></li>
+        <li><a href="%LICENSING_URL%">License</a></li>
+      </ul>
+    </nav>
+    <div class="side-foot">
+      <div class="toggle js-only" role="group" aria-label="Page format">
+        <button type="button" data-view="page" aria-pressed="true">Page</button>
+        <button type="button" data-view="markdown" aria-pressed="false">View Markdown</button>
+      </div>
+      <noscript><a class="md-link" href="./index.md">View Markdown</a></noscript>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+  <main id="main" tabindex="-1">
+  <div class="when js-only" role="group" aria-label="Time of day">
+    <button type="button" data-theme-set="light" aria-pressed="false">Day</button>
+    <button type="button" data-theme-set="dark" aria-pressed="false">Dusk</button>
+  </div>
+
+    <pre class="md" id="markdown" hidden><!-- include src/page.md --></pre>
+
+    <div class="content">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="scene" aria-hidden="true">
+          <div class="layer day"><x-img name="scene-day" alt="" fetchpriority="high"></div>
+          <div class="layer dusk"><x-img name="scene-dusk" alt="" fetchpriority="high"></div>
+        </div>
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <span class="tab">Open source</span>
+            <h1 id="hero-title">Open-source artifacts that you and your agents work on <em>together</em>.</h1>
+            <p class="lede">Tables, docs, boards and issue trackers that Claude, ChatGPT, Codex and you all edit together, live. Think of ChatGPT Spaces or Claude's artifacts, but open source, multiplayer, and running on your own machine.</p>
+            <div class="ctas">
+              <div class="cmd"><span class="prompt" aria-hidden="true">$</span><code>npx stdartifacts serve</code><button class="copy js-only" type="button" aria-label="Copy npx stdartifacts serve">Copy</button></div>
+              <a class="btn s" href="#connect">Connect your agent →</a>
+              <a class="btn s gh" href="%GITHUB_URL%"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+            </div>
+            <p class="hint">Starts on localhost:4747 and keeps your data in <code>~/.stdartifacts</code>. No account, no cloud.</p>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Product surfaces">
+            <button type="button" role="tab" id="tab-tracker" aria-controls="panel-tracker" aria-selected="true"><span class="dot" style="background:var(--tracker)"></span>Trackers</button>
+            <button type="button" role="tab" id="tab-table" aria-controls="panel-table" aria-selected="false" tabindex="-1"><span class="dot" style="background:var(--table)"></span>Tables</button>
+            <button type="button" role="tab" id="tab-board" aria-controls="panel-board" aria-selected="false" tabindex="-1"><span class="dot" style="background:var(--board)"></span>Boards</button>
+            <button type="button" role="tab" id="tab-doc" aria-controls="panel-doc" aria-selected="false" tabindex="-1"><span class="dot" style="background:var(--doc)"></span>Docs</button>
+          </div>
+          <div class="shot-panel" role="tabpanel" id="panel-tracker" aria-labelledby="tab-tracker" data-active>
+            <div class="shot">
+              <x-img name="shot-tracker-day" class="day" sizes="(min-width: 1024px) 70vw, (min-width: 560px) 94vw, 600px" alt="An issue where Claude has enriched a leads table and written a brief, waiting for approval.">
+              <x-img name="shot-tracker-dusk" class="dusk" sizes="(min-width: 1024px) 70vw, (min-width: 560px) 94vw, 600px" alt="An issue where Claude has enriched a leads table and written a brief, waiting for approval.">
+            </div>
+            <p class="cap">An agent's run on an issue, waiting for a person to approve or reject it.</p>
+          </div>
+          <div class="shot-panel" role="tabpanel" id="panel-table" aria-labelledby="tab-table">
+            <div class="shot">
+              <x-img name="shot-table-day" class="day" sizes="(min-width: 1024px) 70vw, (min-width: 560px) 94vw, 600px" alt="A table of twelve leads with Claude working in one of the cells.">
+              <x-img name="shot-table-dusk" class="dusk" sizes="(min-width: 1024px) 70vw, (min-width: 560px) 94vw, 600px" alt="A table of twelve leads with Claude working in one of the cells.">
+            </div>
+            <p class="cap">Structured data, with the agent's cursor in the cell it's filling in.</p>
+          </div>
+          <div class="shot-panel" role="tabpanel" id="panel-board" aria-labelledby="tab-board">
+            <div class="shot">
+              <x-img name="shot-board-day" class="day" sizes="(min-width: 1024px) 70vw, (min-width: 560px) 94vw, 600px" alt="A board of connected notes with Claude's live cursor on one of them.">
+              <x-img name="shot-board-dusk" class="dusk" sizes="(min-width: 1024px) 70vw, (min-width: 560px) 94vw, 600px" alt="A board of connected notes with Claude's live cursor on one of them.">
+            </div>
+            <p class="cap">A shared canvas, with every note attributed to whoever wrote it.</p>
+          </div>
+          <div class="shot-panel" role="tabpanel" id="panel-doc" aria-labelledby="tab-doc">
+            <div class="shot">
+              <x-img name="shot-doc-day" class="day" sizes="(min-width: 1024px) 70vw, (min-width: 560px) 94vw, 600px" alt="A brief called Who to call first, with Claude editing one of its lines.">
+              <x-img name="shot-doc-dusk" class="dusk" sizes="(min-width: 1024px) 70vw, (min-width: 560px) 94vw, 600px" alt="A brief called Who to call first, with Claude editing one of its lines.">
+            </div>
+            <p class="cap">Long-form writing, with live presence on the block being edited.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="col" id="surfaces" aria-labelledby="surfaces-title">
+        <h2 id="surfaces-title"><span class="hash" aria-hidden="true">#</span>Four surfaces, one record</h2>
+        <p class="lead">Your work lives in four kinds of artifact, in one workspace. Agents reach them through MCP tools, the CLI or the API, and what one agent makes, the next can read and build on.</p>
+        <div class="plates">
+          <article class="plate" id="tables">
+            <div class="pic">
+              <x-img name="plate-table-day" class="day" sizes="(min-width: 1024px) 36vw, (min-width: 620px) 47vw, 92vw" alt="">
+              <x-img name="plate-table-dusk" class="dusk" sizes="(min-width: 1024px) 36vw, (min-width: 620px) 47vw, 92vw" alt="">
+            </div>
+            <h3><span class="dot" style="background:var(--table)"></span>Tables</h3>
+            <p>Structured data, with an agent's cursor in the cell it's filling in.</p>
+            <div class="tools"><code>table_add_rows</code><code>table_set_cells</code></div>
+          </article>
+          <article class="plate" id="boards">
+            <div class="pic">
+              <x-img name="plate-board-day" class="day" sizes="(min-width: 1024px) 36vw, (min-width: 620px) 47vw, 92vw" alt="">
+              <x-img name="plate-board-dusk" class="dusk" sizes="(min-width: 1024px) 36vw, (min-width: 620px) 47vw, 92vw" alt="">
+            </div>
+            <h3><span class="dot" style="background:var(--board)"></span>Boards</h3>
+            <p>A shared canvas for notes, images and live mockups, each attributed to whoever made it.</p>
+            <div class="tools"><code>board_add</code><code>board_add_html</code></div>
+          </article>
+          <article class="plate" id="docs">
+            <div class="pic">
+              <x-img name="plate-doc-day" class="day" sizes="(min-width: 1024px) 36vw, (min-width: 620px) 47vw, 92vw" alt="">
+              <x-img name="plate-doc-dusk" class="dusk" sizes="(min-width: 1024px) 36vw, (min-width: 620px) 47vw, 92vw" alt="">
+            </div>
+            <h3><span class="dot" style="background:var(--doc)"></span>Docs</h3>
+            <p>Long-form writing, edited block by block, with presence on the block being edited.</p>
+            <div class="tools"><code>doc_append</code><code>doc_update_block</code></div>
+          </article>
+          <article class="plate" id="trackers">
+            <div class="pic">
+              <x-img name="plate-tracker-day" class="day" sizes="(min-width: 1024px) 36vw, (min-width: 620px) 47vw, 92vw" alt="">
+              <x-img name="plate-tracker-dusk" class="dusk" sizes="(min-width: 1024px) 36vw, (min-width: 620px) 47vw, 92vw" alt="">
+            </div>
+            <h3><span class="dot" style="background:var(--tracker)"></span>Trackers</h3>
+            <p>Issues you can delegate to an agent. Every run keeps its steps on the issue.</p>
+            <div class="tools"><code>start_run</code><code>log_step</code><code>complete_run</code></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col rec" id="runs" aria-labelledby="runs-title">
+        <h2 id="runs-title"><span class="hash" aria-hidden="true">#</span>Nothing happens off the tape</h2>
+        <p class="lead">Each step an agent takes is stamped on its run, along with the surface it touched. When the run ends, the tape stops and waits for a person. Approve it or reject it, and the record stays.</p>
+        <!-- include src/recorder/figure.html -->
+        <div class="also">
+          <div><h3><span class="dot" style="background:var(--board)"></span>Live presence</h3><p>See what an agent is touching, right now, on the same canvas you're on.</p></div>
+          <div><h3><span class="dot" style="background:var(--table)"></span>Small, reviewable edits</h3><p>Cell-level and block-level changes instead of rewrites.</p></div>
+          <div><h3><span class="dot" style="background:var(--doc)"></span>Built for agents to read</h3><p>Every artifact reads as plain text, and this page has a Markdown view.</p></div>
+        </div>
+      </section>
+
+      <section class="conn" id="connect" aria-labelledby="connect-title">
+        <div class="layer day"><x-img name="scene-day" sizes="(min-width: 1024px) 80vw, 1500px" alt=""></div>
+        <div class="layer dusk"><x-img name="scene-dusk" sizes="(min-width: 1024px) 80vw, 1500px" alt=""></div>
+        <div class="conn-inner">
+          <div class="say">
+            <h2 id="connect-title"><span class="hash" aria-hidden="true">#</span>Connect your agent</h2>
+            <p class="lead">Add one MCP server, and your agent can read and edit the artifacts you do, pick up issues you delegate, and leave a record you can read later.</p>
+            <ul>
+              <li><b>Any agent, one workspace.</b> Claude Code, Codex and your own scripts use the same tools.</li>
+              <li><b>Live, like Figma.</b> You see the agent's cursor and status while it works.</li>
+              <li><b>On your machine.</b> The tools talk to your server on localhost.</li>
+            </ul>
+          </div>
+          <div class="term">
+            <div class="ctabs" role="tablist" aria-label="Agent">
+              <button type="button" role="tab" id="ctab-claude" aria-controls="pane-claude" aria-selected="true">Claude Code</button>
+              <button type="button" role="tab" id="ctab-codex" aria-controls="pane-codex" aria-selected="false" tabindex="-1">Codex</button>
+              <button type="button" role="tab" id="ctab-chatgpt" aria-controls="pane-chatgpt" aria-selected="false" tabindex="-1">ChatGPT</button>
+            </div>
+            <div class="pane" role="tabpanel" id="pane-claude" aria-labelledby="ctab-claude" data-active>
+              <div class="file"><span><span class="nojs-name">Claude Code: </span>Terminal</span><button class="copy js-only" type="button">Copy</button></div>
+              <pre>claude mcp add stdartifacts -e STDARTIFACTS_URL=http://localhost:4747 -- npx stdartifacts mcp</pre>
+              <p class="nt">Then ask for something like “make a board that maps out our launch, and a tracker with the first ten tasks”, and watch the board fill in.</p>
+            </div>
+            <div class="pane" role="tabpanel" id="pane-codex" aria-labelledby="ctab-codex">
+              <div class="file"><span><span class="nojs-name">Codex: </span>~/.codex/config.toml</span><button class="copy js-only" type="button">Copy</button></div>
+              <pre>[mcp_servers.stdartifacts]
+command = "npx"
+args = ["stdartifacts", "mcp"]
+env = { STDARTIFACTS_URL = "http://localhost:4747" }</pre>
+              <p class="nt">Codex picks the server up on its next start. Other MCP clients that run a command over stdio connect the same way.</p>
+            </div>
+            <div class="pane" role="tabpanel" id="pane-chatgpt" aria-labelledby="ctab-chatgpt">
+              <div class="file"><span><span class="nojs-name">ChatGPT: </span>Connectors</span></div>
+              <p class="soon">ChatGPT and Claude connectors need a public HTTPS server with sign-in. They come with Cloud.</p>
+              <p class="nt">Until then, <a href="%REMOTE_MCP_DOCS_URL%">the docs</a> show a dev tunnel. A tunnel exposes your workspace to anyone with its URL.</p>
+            </div>
+            <div class="tape">
+              <div class="tp">Its first run</div>
+              <div class="ln" style="--i:0"><span class="dot" style="background:var(--tracker)"></span><code>my_issues</code><span>#12 Enrich the leads, delegated to you</span></div>
+              <div class="ln" style="--i:1"><span class="dot" style="background:var(--tracker)"></span><code>start_run</code><span>Run started on #12</span></div>
+              <div class="ln" style="--i:2"><span class="dot" style="background:var(--table)"></span><code>table_set_cells</code><span>Updated 36 cells in Leads</span></div>
+              <div class="ln" style="--i:3"><span class="dot" style="background:var(--tracker)"></span><code>complete_run</code><span>Waiting for your review</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="col price" id="plans" aria-labelledby="plans-title">
+        <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+          <symbol id="person" viewBox="0 0 24 32"><circle cx="12" cy="7" r="6"/><path d="M1 32v-9a11 9 0 0 1 22 0v9z"/></symbol>
+          <symbol id="robot" viewBox="0 0 24 32"><rect x="11" y="0" width="2" height="5"/><circle cx="12" cy="2" r="2"/><circle cx="12" cy="13" r="10"/><path d="M3 22h18a3 3 0 0 1 2 3v1a6 6 0 0 1-6 6H7a6 6 0 0 1-6-6v-1a3 3 0 0 1 2-3z"/><circle cx="8.2" cy="12" r="1.9" style="fill:var(--bg)"/><circle cx="15.8" cy="12" r="1.9" style="fill:var(--bg)"/></symbol>
+        </defs></svg>
+        <h2 id="plans-title"><span class="hash" aria-hidden="true">#</span>Solo or Cloud</h2>
+        <p class="lead">Run it yourself for free, or let us host it for your team.</p>
+        <div class="plans">
+          <div class="plan">
+            <h3>Solo <span class="tag">Open source</span></h3>
+            <div class="amt">Free</div>
+            <div class="seats" role="img" aria-label="One person, and any number of agents">
+              <span class="ppl"><svg class="person"><use href="#person"/></svg></span>
+              <span class="bots"><svg class="robot"><use href="#robot"/></svg><svg class="robot"><use href="#robot"/></svg><svg class="robot"><use href="#robot"/></svg><em>any number</em></span>
+            </div>
+            <p>You and your agents, on your machine.</p>
+            <ul><li>Runs with <code>npx stdartifacts serve</code></li><li>Tables, docs, boards and trackers</li><li>Claude Code, Codex and scripts over local MCP</li><li><code>stdartifacts agent serve</code> answers <code>@claude</code></li></ul>
+            <a class="btn p" href="%GITHUB_URL%">View on GitHub</a>
+          </div>
+          <div class="plan">
+            <h3>Cloud <span class="tag">Coming soon</span></h3>
+            <div class="amt tbd">Per team</div>
+            <div class="seats" role="img" aria-label="Five people, and any number of agents">
+              <span class="ppl"><svg class="person"><use href="#person"/></svg><svg class="person"><use href="#person"/></svg><svg class="person"><use href="#person"/></svg><svg class="person"><use href="#person"/></svg><svg class="person"><use href="#person"/></svg></span>
+              <span class="bots"><svg class="robot"><use href="#robot"/></svg><svg class="robot"><use href="#robot"/></svg><svg class="robot"><use href="#robot"/></svg><em>any number</em></span>
+            </div>
+            <p>Your team, with sign-in and roles, at standardartifacts.com.</p>
+            <ul><li>Everything in Solo, hosted for you</li><li>Everyone editing together, live</li><li>ChatGPT and Claude connectors</li><li>Hosted <code>@claude</code> runs</li></ul>
+            <a class="btn s" href="%WAITLIST_URL%">Join the waitlist</a>
+          </div>
+        </div>
+        <p class="license">The server and web app are <a href="%GITHUB_URL%/blob/main/LICENSE">AGPL-3.0-only</a>. The client libraries, MCP server and CLI are Apache-2.0, so you can build on them freely. <a href="%LICENSING_URL%">Why</a>.</p>
+      </section>
+
+      <section class="col faq" id="faq" aria-labelledby="faq-title">
+        <h2 id="faq-title">Before you connect anything</h2>
+        <div class="qs">
+          <details name="faq" open><summary>Is it really free?<span class="pm" aria-hidden="true"></span></summary><p>Yes. Solo is open source and runs on your machine with <code>npx stdartifacts serve</code>, with no account and no cloud. Cloud, hosted for teams, will be priced per team.</p></details>
+          <details name="faq"><summary>Where does my data live?<span class="pm" aria-hidden="true"></span></summary><p>Solo keeps your workspace in <code>~/.stdartifacts</code> on your machine, or wherever <code>--data</code> points. The agents you connect read it through MCP, like any other tool they use.</p></details>
+          <details name="faq"><summary>Which agents can connect?<span class="pm" aria-hidden="true"></span></summary><p>Claude Code, Codex and your own scripts connect over local MCP, the CLI or plain HTTP. Other MCP clients that run a command over stdio connect the same way. ChatGPT and Claude connectors need a public HTTPS server with sign-in, which comes with Cloud.</p></details>
+          <details name="faq"><summary>What gets recorded when an agent works?<span class="pm" aria-hidden="true"></span></summary><p>While a run is open, each change made through the MCP tools lands on it as a step, and the agent can add its own notes. A run keeps up to 300 steps. Changes made through the CLI aren't logged on a run yet.</p></details>
+          <details name="faq"><summary>Does rejecting a run undo its changes?<span class="pm" aria-hidden="true"></span></summary><p>No. Reject marks the run as failed and keeps its steps on the record. The changes stay in place until someone edits them, so you can see exactly what to fix.</p></details>
+          <details name="faq"><summary>Can my team use my server?<span class="pm" aria-hidden="true"></span></summary><p>Not yet. Self-hosting for a team needs sign-in, which isn't built, so a self-hosted server is for one person on localhost. Cloud brings teams, sign-in and roles.</p></details>
+          <details name="faq"><summary>Can I get my data out?<span class="pm" aria-hidden="true"></span></summary><p>Every artifact reads as plain text over the API, CLI and MCP: rows for tables, shapes for boards, Markdown for docs. There's no one-click export yet.</p></details>
+          <details name="faq"><summary>How is it licensed?<span class="pm" aria-hidden="true"></span></summary><p>The server, web app and artifact UI are AGPL-3.0-only. The client libraries, MCP server and CLI are Apache-2.0. <a href="%LICENSING_URL%">LICENSING.md</a> explains why.</p></details>
+        </div>
+      </section>
+    </div>
+    <p class="sr" role="status" data-copy-status></p>
+  </main>
+
+  <div class="end content">
+    <div class="sc day"><x-img name="close-day" sizes="(min-width: 1024px) 80vw, 1100px" alt=""></div>
+    <div class="sc dusk"><x-img name="close-dusk" sizes="(min-width: 1024px) 80vw, 1100px" alt=""></div>
+    <div class="gr day"><x-img name="close-day" sizes="(min-width: 1024px) 80vw, 1100px" alt=""></div>
+    <div class="gr dusk"><x-img name="close-dusk" sizes="(min-width: 1024px) 80vw, 1100px" alt=""></div>
+    <section class="pitch" id="start" aria-labelledby="pitch-title">
+      <h2 id="pitch-title">The chat ends.<br>The work stays.</h2>
+      <div class="go"><div class="cmd"><span class="prompt" aria-hidden="true">$</span><code>npx stdartifacts serve</code><button class="copy js-only" type="button" aria-label="Copy npx stdartifacts serve">Copy</button></div><a class="btn s" href="%GITHUB_URL%">View on GitHub</a></div>
+    </section>
+    <footer class="foot">
+      <div class="cols">
+        <nav aria-label="Product links"><p class="nav-h">Product</p><a href="#surfaces">Surfaces</a><a href="#plans">Solo or Cloud</a><a href="#faq">FAQ</a></nav>
+        <nav aria-label="Developer links"><p class="nav-h">Developers</p><a href="#connect">MCP tools</a><a href="%GITHUB_URL%">GitHub</a><a href="%NPM_URL%">npm</a><a href="%LICENSING_URL%">License</a></nav>
+      </div>
+      <svg class="word" viewBox="0 0 1000 112" aria-hidden="true" focusable="false"><text x="0" y="102" font-size="128" textLength="1000" lengthAdjust="spacingAndGlyphs">Standard Artifacts</text></svg>
+      <div class="base"><span>© Standard Artifacts. Open source under AGPL-3.0 and Apache-2.0.</span><span>ChatGPT is a trademark of OpenAI. Claude is a trademark of Anthropic. Standard Artifacts isn't affiliated with or endorsed by either.</span></div>
+    </footer>
+  </div>
+</div>
+</div>
+</body>
+</html>
