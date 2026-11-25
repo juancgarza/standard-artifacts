@@ -4,13 +4,13 @@ Thanks for helping with Standard Artifacts. Issues and pull requests are welcome
 
 ## Before your first pull request
 
-Read the [Contributor License Agreement](CLA.md). It's an individual CLA modeled on Apache's, and it lets the project owner relicense contributions. To sign it, put this line in your first pull request's description, with your name and the email you commit with:
+Read the [Contributor License Agreement](CLA.md). It's an individual CLA modeled on Apache's, and it lets the project owner relicense contributions. It covers all your contributions, so you sign it once: when you open your first pull request, a bot asks you to, and you sign by commenting exactly this on the pull request:
 
 ```
-I have read CLA.md and agree to it for this and all my future contributions to Standard Artifacts. — Your Name <you@example.com>
+I have read CLA.md and I hereby sign the CLA
 ```
 
-If you contribute as part of your job, make sure your employer allows it (CLA section 5). Pull requests can't be merged until the CLA is signed.
+The bot records your GitHub account in `signatures/cla.json` on the `cla-signatures` branch, and the **CLA** check turns green. Comment `recheck` if it doesn't. If you contribute as part of your job, make sure your employer allows it (CLA section 5). Pull requests can't be merged until everyone who committed to them has signed.
 
 ## Licenses
 

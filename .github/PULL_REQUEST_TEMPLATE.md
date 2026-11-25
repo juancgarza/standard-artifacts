@@ -8,5 +8,4 @@
 
 ## CLA
 
-<!-- First pull request? Add this line, with your name and the email you commit with. See CLA.md. -->
-<!-- I have read CLA.md and agree to it for this and all my future contributions to Standard Artifacts. — Your Name <you@example.com> -->
+<!-- First pull request? A bot will ask you to sign CLA.md by commenting a line on this pull request. See CONTRIBUTING.md. -->
