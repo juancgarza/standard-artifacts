@@ -4,4 +4,4 @@ Standard Artifacts follows the [Contributor Covenant, version 2.1](https://www.c
 
 It applies in this repository's issues, pull requests and discussions, and anywhere you represent the project.
 
-To report unacceptable behavior, email conduct@standardartifacts.com. Reports are kept confidential, and the maintainers will respond and act as the Covenant's enforcement guidelines describe.
+To report unacceptable behavior, email hello@standardartifacts.com. Reports are kept confidential, and the maintainers will respond and act as the Covenant's enforcement guidelines describe.

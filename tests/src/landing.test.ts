@@ -401,7 +401,7 @@ describe("landing page", () => {
       'name="twitter:card"',
       'name="description"',
       'href="https://github.com/juancgarza/standard-artifacts"',
-      'href="mailto:cloud@standardartifacts.com',
+      'href="mailto:hello@standardartifacts.com',
       "ChatGPT is a trademark of OpenAI. Claude is a trademark of Anthropic. Standard Artifacts isn't affiliated with or endorsed by either.",
     ]) {
       assert.ok(html.includes(want), want)

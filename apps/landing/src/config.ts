@@ -14,7 +14,7 @@ export const GITHUB_URL = "https://github.com/juancgarza/standard-artifacts"
 export const NPM_URL = "https://www.npmjs.com/package/stdartifacts"
 
 /** Where "Join the waitlist" for Cloud goes. A mailto until there's a real waitlist form. */
-export const WAITLIST_URL = "mailto:cloud@standardartifacts.com?subject=Standard%20Artifacts%20Cloud%20waitlist"
+export const WAITLIST_URL = "mailto:hello@standardartifacts.com?subject=Standard%20Artifacts%20Cloud%20waitlist"
 
 /** Why the server is AGPL and the clients Apache-2.0. */
 export const LICENSING_URL = `${GITHUB_URL}/blob/main/LICENSING.md`
