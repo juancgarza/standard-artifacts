@@ -1,9 +1,12 @@
-// The landing page as a static-assets Worker: `pnpm --filter @standard-artifacts/landing deploy`.
-// The custom domain (standardartifacts.com) is attached in the Cloudflare dashboard once its zone is on Cloudflare.
+// The landing page as a static-assets Worker: `pnpm --filter @standard-artifacts/landing run deploy`.
 {
   "name": "standard-artifacts-landing",
   "compatibility_date": "2026-11-01",
   "assets": { "directory": "./dist", "html_handling": "auto-trailing-slash", "not_found_handling": "none" },
+  "routes": [
+    { "pattern": "standardartifacts.com", "custom_domain": true },
+    { "pattern": "www.standardartifacts.com", "custom_domain": true }
+  ],
   "workers_dev": true,
   "preview_urls": false
 }
