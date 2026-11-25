@@ -7,6 +7,11 @@ name: Release
 # Bump the versions in a PR, merge it, then run this from the Actions tab.
 on:
   workflow_dispatch:
+    inputs:
+      package:
+        description: "Only this package (e.g. stdartifacts); empty stages every unpublished one"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -35,11 +40,13 @@ jobs:
       - name: Stage unpublished versions
         env:
           NPM_CONFIG_PROVENANCE: "true"
+          ONLY: ${{ inputs.package }}
         run: |
           set -euo pipefail
           for dir in packages/protocol packages/client packages/mcp packages/server apps/cli; do
             name=$(node -p "require('./$dir/package.json').name")
             version=$(node -p "require('./$dir/package.json').version")
+            if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then continue; fi
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already on npm"
               continue
