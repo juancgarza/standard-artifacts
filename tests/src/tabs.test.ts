@@ -248,7 +248,8 @@ describe("tabs", () => {
     await row(page, archived.title).click({ button: "right" })
     await item("Archive doc").click()
     await row(page, archived.title).waitFor({ state: "detached" })
-    assert.ok((await call("GET", "/artifacts/archived")).body.some((a: { id: string }) => a.id === archived.id))
+    // The row leaves optimistically; the archive request can still be in flight.
+    await eventually(async () => (await call("GET", "/artifacts/archived")).body.some((a: { id: string }) => a.id === archived.id))
 
     // Delete asks first; Cancel and Escape leave it alone.
     await row(page, deleted.title).click({ button: "right" })
@@ -264,7 +265,7 @@ describe("tabs", () => {
     await item("Delete doc…").click()
     await page.keyboard.press("Enter")
     await row(page, deleted.title).waitFor({ state: "detached" })
-    assert.equal(await statusOf(deleted.id), 404)
+    await eventually(async () => (await statusOf(deleted.id)) === 404)
 
     // Removing the page you're on leaves it, and its tab goes.
     await row(page, open_.title).click()
