@@ -1,8 +1,9 @@
 name: Release
 
-# Publishes every package whose version isn't on npm yet, with provenance, through npm trusted
-# publishing (OIDC): no npm token is stored in the repo. Each package needs this repo and
-# workflow added as a trusted publisher on npmjs.com (package → Settings → Trusted publishing).
+# Stages every package version that isn't on npm yet, with provenance, through npm trusted
+# publishing (OIDC): no npm token is stored in the repo. Staged versions go live only when a
+# maintainer approves them on npmjs.com (or `npm stage approve <id>`), with 2FA.
+# Each package needs this repo, release.yml and the `npm` environment as a trusted publisher.
 # Bump the versions in a PR, merge it, then run this from the Actions tab.
 on:
   workflow_dispatch:
@@ -12,7 +13,7 @@ permissions:
   id-token: write
 
 jobs:
-  publish:
+  stage:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm
@@ -24,14 +25,29 @@ jobs:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm 11.5.1 or later; pnpm hands the packed tarball to npm.
-      - run: npm install -g npm@11.12.1
+      # `npm stage publish` arrived in npm 12.
+      - run: npm install -g npm@12.2.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm pack-check
-      # pnpm skips any package whose current version is already published.
-      - run: pnpm -r publish --access public --no-git-checks
+      # pnpm packs (it fills in workspace: versions and publishConfig); npm stages the tarball.
+      # Dependencies come first, so they're staged before what needs them.
+      - name: Stage unpublished versions
         env:
           NPM_CONFIG_PROVENANCE: "true"
-          # Shows the OIDC exchange with npm, so a trusted-publisher mismatch is visible in the log.
-          NPM_CONFIG_LOGLEVEL: verbose
+        run: |
+          set -euo pipefail
+          for dir in packages/protocol packages/client packages/mcp packages/server apps/cli; do
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on npm"
+              continue
+            fi
+            out="$RUNNER_TEMP/pack/$(echo "$name" | tr '/@' '__')"
+            mkdir -p "$out"
+            (cd "$dir" && pnpm pack --pack-destination "$out" >/dev/null)
+            npm stage publish "$out"/*.tgz --access public
+            echo "Staged $name@$version"
+          done
+          npm stage list || true

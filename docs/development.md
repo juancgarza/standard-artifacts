@@ -29,7 +29,8 @@ cd tests && node --test src/board.*.test.ts # one area
 Five packages go to npm: `@standard-artifacts/protocol`, `client`, `mcp` and `server`, and the `stdartifacts` CLI. `pnpm pack-check` packs them, installs the tarballs into a fresh project and checks that they import, run and typecheck.
 
 1. Bump the `version` of each package that changed, in a pull request. The CLI also states its version in `apps/cli/src/main.ts`, and MCP does in `serverInfo` in `packages/mcp/src/index.ts`.
-2. Merge it, then run the **Release** workflow from the Actions tab. It publishes every package whose version isn't on npm yet, with provenance, through npm trusted publishing, so the repo holds no npm token.
+2. Merge it, then run the **Release** workflow from the Actions tab. It stages every package version that isn't on npm yet, with provenance, through npm trusted publishing, so the repo holds no npm token.
+3. Approve the staged versions on npmjs.com, or with `npm stage list` and `npm stage approve <id>` (npm 12, with 2FA). Nothing is live until then.
 
 ## Notes
 
