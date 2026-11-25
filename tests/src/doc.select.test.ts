@@ -57,7 +57,7 @@ describe("doc cross-block selection", () => {
     })
     assert.match(spanned, /two three[\s\S]*Bravo middle line[\s\S]*Charlie/)
     assert.ok(await page.getByRole("button", { name: /Ask Claude/ }).first().isVisible())
-    await page.keyboard.press("Meta+c")
+    await page.keyboard.press("ControlOrMeta+c")
     assert.match(await page.evaluate(() => navigator.clipboard.readText()), /Bravo middle line/)
   })
 
