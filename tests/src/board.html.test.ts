@@ -96,9 +96,13 @@ describe("board html embeds", () => {
     // ...and dragging it moves it.
     const start = await box()
     await drag(page, mid(start), { x: mid(start).x + 120, y: mid(start).y + 40 })
+    // A drag writes as it goes, so wait until the position stops changing, not just until it has moved.
     const moved = await eventually(async () => {
       const s = await find(b.id, "s_h")
-      return s && s.x > 80 && s
+      if (!s || s.x <= 80) return false
+      await settle(300)
+      const again = await find(b.id, "s_h")
+      return again && again.x === s.x && again.y === s.y && again
     })
     assert.ok(moved.y > 20)
     assert.equal(await frame.locator("#b").textContent(), "0", "the drag didn't click anything inside")
