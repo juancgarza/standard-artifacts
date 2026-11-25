@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@types/node": "^24",
+    "miniflare": "4.20260730.0",
     "playwright-core": "1.56.1",
     "typescript": "^6.0.3"
   }
