@@ -2,9 +2,21 @@ import { ConfigProvider, Effect, Layer, ManagedRuntime } from "effect"
 import { HttpRouter, HttpServer } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { Api, kinds, type Principal } from "@standard-artifacts/protocol"
+import { Accounts } from "./accounts"
 import { Auth, GUEST_COOKIE, SHARE_COOKIE, credentialsFromRequest, readCookie } from "./auth"
+import { authRoute, isAuthPath } from "./auth-routes"
 import { Bindings, type Env } from "./env"
-import { AuthenticationLive, MentionsHandlers, RoomsHandlers, SearchHandlers, SharingHandlers, ValidationErrorsLive, WorkspaceHandlers } from "./http"
+import {
+  AuthenticationLive,
+  MentionsHandlers,
+  OrgHandlers,
+  RoomsHandlers,
+  SearchHandlers,
+  SharingHandlers,
+  TokensHandlers,
+  ValidationErrorsLive,
+  WorkspaceHandlers,
+} from "./http"
 import { Rooms, Search, Workspaces } from "./services"
 import { mcpCellName } from "./cells/mcp-cell"
 
@@ -17,6 +29,7 @@ import { mcpCellName } from "./cells/mcp-cell"
  *   /api/v1/workspace/live  WebSocket into the org's cell: says when the index changed
  *   /api/v1/share/:token  open a share link: sets a cookie, redirects to the artifact
  *   /api/v1/share/exit    drop the share cookie (dev: back to the local owner)
+ *   /api/auth/*         browser sign-in with WorkOS (live mode): see auth-routes.ts
  *   /api/v1/*           the HttpApi contract in @standard-artifacts/protocol
  */
 
@@ -24,6 +37,7 @@ import { mcpCellName } from "./cells/mcp-cell"
 const services = (env: Env) =>
   Layer.mergeAll(Auth.layer, Rooms.layer, Search.layer).pipe(
     Layer.provideMerge(Workspaces.layer),
+    Layer.provideMerge(Accounts.layer),
     Layer.provide(Layer.succeed(Bindings, env)),
     Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
   )
@@ -33,7 +47,7 @@ const build = (env: Env) => {
   const runtime = ManagedRuntime.make(layer)
   const api = HttpRouter.toWebHandler(
     HttpApiBuilder.layer(Api).pipe(
-      Layer.provide([WorkspaceHandlers, RoomsHandlers, MentionsHandlers, SharingHandlers, SearchHandlers]),
+      Layer.provide([WorkspaceHandlers, RoomsHandlers, MentionsHandlers, SharingHandlers, SearchHandlers, OrgHandlers, TokensHandlers]),
       Layer.provide([AuthenticationLive, ValidationErrorsLive]),
       Layer.provide(layer),
       Layer.provide(HttpServer.layerServices),
@@ -54,6 +68,7 @@ export function handle(request: Request, env: Env): Promise<Response> {
   app ??= build(env)
   const url = new URL(request.url)
   if (url.pathname === "/mcp") return app.runtime.runPromise(routeMcp(request, env))
+  if (isAuthPath(url.pathname)) return app.runtime.runPromise(authRoute(request))
   const roomId = url.pathname.match(roomPath)?.[1]
   if (roomId && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
     return app.runtime.runPromise(connectRoom(request, roomId))
@@ -169,7 +184,7 @@ const routeMcp = (request: Request, env: Env) =>
     const exit = yield* Effect.exit((yield* Auth).resolve(credentialsFromRequest(forwarded)))
     if (exit._tag === "Failure") {
       return Response.json(
-        { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Sign in to use this MCP server (Authorization: Bearer <ticket>)." } },
+        { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Sign in to use this MCP server: Authorization: Bearer <token>, with a token from Settings → Access tokens." } },
         { status: 401, headers: { "www-authenticate": 'Bearer realm="standard-artifacts"' } },
       )
     }

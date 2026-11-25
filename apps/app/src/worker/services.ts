@@ -16,6 +16,8 @@ import {
   tableToText,
   trackerToText,
   type AgentPresence,
+  type ApiToken,
+  type CreatedApiToken,
   type Artifact,
   type ArtifactAccess,
   type ArtifactKind,
@@ -40,6 +42,7 @@ import type { Asset, PutAsset } from "./cells/asset-cell"
 import { SCOPE_HEADER, type CellResult, type FolderResult } from "./cells/workspace-cell"
 import { Bindings } from "./env"
 import { queryItems, searchConfig } from "./search-index"
+import { hashApiToken, newApiToken } from "./session"
 
 /**
  * Await a cell RPC call with its declared result type. (TypeScript widens a
@@ -97,6 +100,13 @@ export class Workspaces extends Context.Service<
     readonly deleteLink: (p: Principal, id: string) => Effect.Effect<void, Forbidden | NotFound>
     /** A socket that says when the index changed, so open pages can read it again. */
     readonly connect: (p: Principal, request: Request) => Effect.Effect<Response>
+    /** The caller's personal access tokens in this org. */
+    readonly listTokens: (p: Principal) => Effect.Effect<ReadonlyArray<ApiToken>, Forbidden | NotFound>
+    /** A new token. The only time its value is shown. */
+    readonly createToken: (p: Principal, name: string) => Effect.Effect<CreatedApiToken, Forbidden | NotFound>
+    readonly revokeToken: (p: Principal, id: string) => Effect.Effect<void, Forbidden | NotFound>
+    /** Someone left the org: their tokens stop working. */
+    readonly revokeUserTokens: (p: Principal, userId: string) => Effect.Effect<void>
   }
 >()("@standard-artifacts/Workspaces") {
   static readonly layer = Layer.effect(
@@ -193,6 +203,22 @@ export class Workspaces extends Context.Service<
           if (p.scope) headers.set(SCOPE_HEADER, p.scope)
           else headers.delete(SCOPE_HEADER)
           return yield* rpc((): Promise<Response> => cell(p).fetch(new Request(request.url, { headers })))
+        }),
+        listTokens: Effect.fn("Workspaces.listTokens")(function* (p) {
+          return yield* fromCell(yield* rpc((): Promise<CellResult<Array<ApiToken>>> => cell(p).listTokens(p)))
+        }),
+        createToken: Effect.fn("Workspaces.createToken")(function* (p, name) {
+          const token = newApiToken(p.orgId)
+          const hash = yield* Effect.promise(() => hashApiToken(token))
+          const id = `tok_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`
+          const stored = yield* fromCell(yield* rpc((): Promise<CellResult<ApiToken>> => cell(p).createToken(p, { id, hash, name })))
+          return { ...stored, token }
+        }),
+        revokeToken: Effect.fn("Workspaces.revokeToken")(function* (p, id) {
+          yield* fromCell(yield* rpc((): Promise<CellResult<null>> => cell(p).revokeToken(p, id)))
+        }),
+        revokeUserTokens: Effect.fn("Workspaces.revokeUserTokens")(function* (p, userId) {
+          yield* rpc((): Promise<number> => cell(p).revokeUserTokens(userId))
         }),
       })
     }),

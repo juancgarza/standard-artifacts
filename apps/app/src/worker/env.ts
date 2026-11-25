@@ -31,8 +31,21 @@ export interface Env {
   readonly DEV_OWNER_NAME?: string
   /** Dev only: hosts besides localhost allowed to reach a dev server (comma-separated), e.g. a tunnel. See dev-guard.ts. */
   readonly DEV_ALLOWED_HOSTS?: string
-  /** Shared with the account service; tickets are HMAC-SHA256 signed with it. */
+  /** Tickets are HMAC-SHA256 signed with it. Required in live mode. */
   readonly TICKET_SECRET?: string
+  /**
+   * Sign-in (live mode): WorkOS AuthKit, with WorkOS Organizations as the source
+   * of truth for members and roles. Live mode needs all three, or every sign-in
+   * fails with a message saying what's missing; it never falls back to dev.
+   */
+  readonly WORKOS_API_KEY?: string
+  readonly WORKOS_CLIENT_ID?: string
+  /** Seals the session cookie (AES-GCM). At least 32 characters. Changing it signs everyone out. */
+  readonly WORKOS_COOKIE_PASSWORD?: string
+  /** The app's public address, for AuthKit's redirect URI (<APP_URL>/api/auth/callback). Default: the request's origin. */
+  readonly APP_URL?: string
+  /** Default https://api.workos.com. The tests point it at a fake. */
+  readonly WORKOS_API_URL?: string
   /** Turns on content search. Without it, nothing is indexed and search matches titles only. */
   readonly TURBOPUFFER_API_KEY?: string
   /** The region's host (default aws-us-east-1). Namespaces live in one region. */

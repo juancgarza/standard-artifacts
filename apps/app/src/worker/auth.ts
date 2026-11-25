@@ -1,6 +1,9 @@
 import { Config, Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect"
 import { Ticket, Unauthorized, type ArtifactKind, type Principal } from "@standard-artifacts/protocol"
+import { Accounts } from "./accounts"
+import type { ResolvedToken } from "./cells/workspace-cell"
 import { Bindings } from "./env"
+import { TICKET_COOKIE, agentRole, apiTokenOrg, hashApiToken } from "./session"
 
 /**
  * What a transport could find on a request. HTTP reads headers and cookies;
@@ -48,11 +51,19 @@ export class Auth extends Context.Service<
    * Share links: a token `sh.<org>.<secret>` (cookie, or bearer for scripts)
    * resolves to a read-only guest scoped to one artifact, as long as the
    * link is still on in the org's WorkspaceCell.
+   *
+   * Personal access tokens: `sat_…` (bearer, for the CLI and MCP) resolve to
+   * the person who made it, with their current role. The org's WorkspaceCell
+   * keeps a hash and the role; the account service confirms the role every
+   * few minutes, and a token of someone who left stops working. With
+   * `x-dev-as: agent` (what `stdartifacts mcp` sends) the same token acts as an
+   * agent for that person, never above editor.
    */
   static readonly layer = Layer.effect(
     Auth,
     Effect.gen(function* () {
       const env = yield* Bindings
+      const accounts = yield* Accounts
       const mode = yield* Config.String("AUTH_MODE").pipe(Config.withDefault("live"))
       // The local owner's display name. `stdartifacts serve` passes the OS user's; Alchemy dev keeps "JC".
       const ownerName = (yield* Config.String("DEV_OWNER_NAME").pipe(Config.withDefault(""))).trim().slice(0, 80) || "JC"
@@ -74,7 +85,8 @@ export class Auth extends Context.Service<
 
       const verify = Effect.fn("Auth.verifyTicket")(function* (token: string) {
         const [body, sig] = token.split(".")
-        if (!key || !body || !sig) return yield* unauthorized("Invalid ticket")
+        if (!key) return yield* unauthorized(mode === "dev" ? "Invalid ticket" : "This server has no TICKET_SECRET, so it can't check sign-ins")
+        if (!body || !sig) return yield* unauthorized("Invalid ticket")
         const valid = yield* Effect.promise(() =>
           crypto.subtle.verify("HMAC", key, fromB64url(sig), new TextEncoder().encode(body)),
         )
@@ -109,22 +121,73 @@ export class Auth extends Context.Service<
         } satisfies Principal
       })
 
+      const cellOf = (orgId: string) => env.WORKSPACE.get(env.WORKSPACE.idFromName(orgId))
+
+      /** A token's role, checked with the account service when the last check is older than this. */
+      const TOKEN_CHECK_MS = 5 * 60 * 1000
+      /** If the account service is down, a token keeps its last-known role for this long, then stops. */
+      const TOKEN_GRACE_MS = 60 * 60 * 1000
+
+      const viaToken = Effect.fn("Auth.viaToken")(function* (token: string, devAs: string | undefined) {
+        const orgId = apiTokenOrg(token)
+        if (!orgId) return yield* unauthorized("Invalid access token")
+        const hash = yield* Effect.promise(() => hashApiToken(token))
+        const cell = cellOf(orgId)
+        const found = yield* Effect.promise(async (): Promise<ResolvedToken | null> => await cell.resolveToken(hash))
+        if (!found) return yield* unauthorized("This access token was revoked")
+        let role = found.role
+        const age = Date.now() - found.checkedAt
+        if (age > TOKEN_CHECK_MS) {
+          const current = yield* Effect.exit(accounts.currentRole(orgId, found.userId))
+          if (current._tag === "Failure") {
+            if (age > TOKEN_GRACE_MS) return yield* unauthorized("Couldn't check this access token with the account service. Try again in a moment.")
+          } else if (current.value === null) {
+            yield* Effect.promise(async () => void (await cell.revokeUserTokens(found.userId)))
+            return yield* unauthorized("This access token's owner isn't in the workspace anymore")
+          } else if (current.value !== undefined) {
+            role = current.value
+            yield* Effect.promise(async () => void (await cell.tokenRoleChecked(found.userId, role)))
+          }
+        }
+        const base = { orgId, orgName: found.orgName, plan: found.plan }
+        const slug = found.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "token"
+        const principal: Principal =
+          devAs === "agent"
+            ? { ...base, role: agentRole(role), actor: { type: "agent", id: `agt_${slug}`, onBehalfOf: found.userId, name: found.name } }
+            : { ...base, role, actor: { type: "user", id: found.userId, name: found.userName } }
+        fromAccessToken.add(principal)
+        return principal
+      })
+
       const principalOf = Effect.fn("Auth.principalOf")(function* (c: Credentials) {
         const token = c.bearer ?? c.ticket ?? c.cookie
         if (token?.startsWith("sh.")) return yield* guestOf(token, c.guest)
+        if (token?.startsWith("sat_")) return yield* viaToken(token, c.devAs)
         if (token) return yield* verify(token)
         // In dev an explicit "view as" wins over a share cookie, so the switch keeps working.
         if (mode === "dev" && c.devAs) return devPrincipal(c.devAs)
         if (c.share) return yield* guestOf(c.share, c.guest)
-        if (mode !== "dev") return yield* unauthorized("Sign in required")
+        if (mode !== "dev") return yield* unauthorized("Sign in required: sign in, or send an access token (Settings → Access tokens) as a bearer token")
         return devPrincipal(c.devAs)
       })
-      const resolve = (c: Credentials) => Effect.map(principalOf(c), (p) => fromClient(p, c.client))
+      const resolve = (c: Credentials) =>
+        Effect.map(principalOf(c), (p) => {
+          const labeled = fromClient(p, c.client)
+          if (labeled !== p && fromAccessToken.has(p)) fromAccessToken.add(labeled)
+          return labeled
+        })
 
       return Auth.of({ resolve, shared })
     }).pipe(Effect.orDie),
   )
 }
+
+/**
+ * Principals that came from an access token. A token can't mint more tokens, so a
+ * leaked one can't outlive its revocation. (Kept beside the principal rather than
+ * in it: the principal is the signed contract cells see.)
+ */
+export const fromAccessToken = new WeakSet<Principal>()
 
 const decodeTicket = Schema.decodeUnknownResult(Schema.fromJsonString(Ticket))
 
@@ -156,7 +219,7 @@ export function credentialsFromRequest(request: Request): Credentials {
   return {
     bearer: bearer(request.headers.get("authorization") ?? undefined),
     ticket: url.searchParams.get("ticket") ?? undefined,
-    cookie: readCookie(request.headers.get("cookie") ?? undefined, "standard_artifacts_ticket"),
+    cookie: readCookie(request.headers.get("cookie") ?? undefined, TICKET_COOKIE),
     devAs: request.headers.get("x-dev-as") ?? url.searchParams.get("as") ?? undefined,
     client: request.headers.get("x-standard-artifacts-client") ?? undefined,
     share: readCookie(request.headers.get("cookie") ?? undefined, SHARE_COOKIE),

@@ -1,8 +1,10 @@
 import { Config, Effect, Layer } from "effect"
 import { HttpServerRequest } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api"
-import { Api, Authentication, CurrentPrincipal, Invalid, ValidationErrors, formatIssue } from "@standard-artifacts/protocol"
-import { Auth, GUEST_COOKIE, SHARE_COOKIE, bearer } from "./auth"
+import { Api, Authentication, CurrentPrincipal, Forbidden, Invalid, ValidationErrors, formatIssue } from "@standard-artifacts/protocol"
+import { Accounts } from "./accounts"
+import { Auth, GUEST_COOKIE, SHARE_COOKIE, bearer, fromAccessToken } from "./auth"
+import { TICKET_COOKIE } from "./session"
 import { Rooms, Search, Workspaces } from "./services"
 
 /** Handlers stay thin: read the principal, call a service, return its result. */
@@ -16,7 +18,7 @@ export const AuthenticationLive = Layer.effect(
         const request = yield* HttpServerRequest.HttpServerRequest
         const principal = yield* auth.resolve({
           bearer: bearer(request.headers["authorization"]),
-          cookie: request.cookies["standard_artifacts_ticket"],
+          cookie: request.cookies[TICKET_COOKIE],
           devAs: request.headers["x-dev-as"],
           client: request.headers["x-standard-artifacts-client"],
           share: request.cookies[SHARE_COOKIE],
@@ -124,6 +126,47 @@ export const SharingHandlers = HttpApiBuilder.group(
       access: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.access(p, params.id)),
       createLink: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.createLink(p, params.id)),
       deleteLink: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.deleteLink(p, params.id)),
+    })
+  }),
+)
+
+export const OrgHandlers = HttpApiBuilder.group(
+  Api,
+  "org",
+  Effect.fn("Http.org")(function* (handlers) {
+    const accounts = yield* Accounts
+    const workspaces = yield* Workspaces
+    return handlers.handleAll({
+      members: () => Effect.flatMap(CurrentPrincipal, (p) => accounts.members(p)),
+      invite: ({ payload }) => Effect.flatMap(CurrentPrincipal, (p) => accounts.invite(p, payload)),
+      resendInvitation: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => accounts.resendInvitation(p, params.id)),
+      revokeInvitation: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => accounts.revokeInvitation(p, params.id)),
+      updateMember: ({ params, payload }) => Effect.flatMap(CurrentPrincipal, (p) => accounts.updateMember(p, params.id, payload.role)),
+      // Whoever leaves takes their access tokens with them.
+      removeMember: ({ params }) =>
+        Effect.gen(function* () {
+          const p = yield* CurrentPrincipal
+          const userId = yield* accounts.removeMember(p, params.id)
+          yield* workspaces.revokeUserTokens(p, userId)
+        }),
+    })
+  }),
+)
+
+export const TokensHandlers = HttpApiBuilder.group(
+  Api,
+  "tokens",
+  Effect.fn("Http.tokens")(function* (handlers) {
+    const workspaces = yield* Workspaces
+    return handlers.handleAll({
+      list: () => Effect.flatMap(CurrentPrincipal, (p) => workspaces.listTokens(p)),
+      create: ({ payload }) =>
+        Effect.flatMap(CurrentPrincipal, (p) =>
+          fromAccessToken.has(p)
+            ? Effect.fail(new Forbidden({ message: "Create access tokens in Settings, not with another token." }))
+            : workspaces.createToken(p, payload.name),
+        ),
+      revoke: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.revokeToken(p, params.id)),
     })
   }),
 )

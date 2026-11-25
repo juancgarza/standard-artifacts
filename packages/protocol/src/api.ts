@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint as E, HttpApiGroup, HttpApiMiddleware } from "effect/http-api"
+import { ApiToken, CreateApiToken, CreatedApiToken, InviteMember, OrgInvitation, OrgMember, OrgMembers, UpdateMember } from "./account.ts"
 import { BoardState } from "./board.ts"
 import { Artifact, ArtifactAccess, CreateArtifact, CreateFolder, CurrentPrincipal, Folder, Id, MoveArtifact, OrgDirectory, ShareLink, UpdateArtifact, UpdateFolder, WorkspaceSnapshot } from "./core.ts"
 import { DocState } from "./doc.ts"
@@ -18,6 +19,8 @@ import { TrackerState } from "./tracker.ts"
 export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", { message: Schema.String }, { httpApiStatus: 401 }) {}
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", { message: Schema.String }, { httpApiStatus: 403 }) {}
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", { message: Schema.String }, { httpApiStatus: 404 }) {}
+/** The account service (sign-in, members) didn't answer, or this server has none. */
+export class Unavailable extends Schema.TaggedError<Unavailable>()("Unavailable", { message: Schema.String }, { httpApiStatus: 503 }) {}
 export class Invalid extends Schema.TaggedError<Invalid>()("Invalid", { message: Schema.String }, { httpApiStatus: 400 }) {}
 
 export const ApiErrors = [Forbidden, NotFound, Invalid]
@@ -121,10 +124,42 @@ export const SearchGroup = HttpApiGroup.make("search")
   .middleware(ValidationErrors)
   .middleware(Authentication)
 
+const AccountErrors = [...ApiErrors, Unavailable]
+
+/**
+ * The org's members, roles and invitations, from the account service (WorkOS in
+ * Cloud). Everyone in the org can list them; owners invite, change roles and
+ * remove people. A server without sign-in answers Unavailable.
+ */
+export const OrgGroup = HttpApiGroup.make("org")
+  .add(
+    E.get("members", "/org/members", { success: OrgMembers, error: AccountErrors }),
+    E.post("invite", "/org/invitations", { payload: InviteMember, success: OrgInvitation, error: AccountErrors }),
+    E.post("resendInvitation", "/org/invitations/:id/resend", { params, success: OrgInvitation, error: AccountErrors }),
+    E.delete("revokeInvitation", "/org/invitations/:id", { params, error: AccountErrors }),
+    E.patch("updateMember", "/org/members/:id", { params, payload: UpdateMember, success: OrgMember, error: AccountErrors }),
+    /** The last owner can't be removed (or demoted): make someone else an owner first. */
+    E.delete("removeMember", "/org/members/:id", { params, error: AccountErrors }),
+  )
+  .middleware(ValidationErrors)
+  .middleware(Authentication)
+
+/** Your personal access tokens in this org, for the CLI and MCP. A token is shown once, when it's created. */
+export const TokensGroup = HttpApiGroup.make("tokens")
+  .add(
+    E.get("list", "/tokens", { success: Schema.Array(ApiToken), error: AccountErrors }),
+    E.post("create", "/tokens", { payload: CreateApiToken, success: CreatedApiToken, error: AccountErrors }),
+    E.delete("revoke", "/tokens/:id", { params, error: AccountErrors }),
+  )
+  .middleware(ValidationErrors)
+  .middleware(Authentication)
+
 export const Api = HttpApi.make("StandardArtifacts")
   .add(WorkspaceGroup)
   .add(RoomsGroup)
   .add(MentionsGroup)
   .add(SharingGroup)
   .add(SearchGroup)
+  .add(OrgGroup)
+  .add(TokensGroup)
   .prefix("/api/v1")

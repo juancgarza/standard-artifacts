@@ -41,6 +41,11 @@ export const App = Cloudflare.Website.StaticSite(
       ...(!stack.stage.startsWith("dev") && { RUNNER: Cloudflare.DurableObject("RunnerCell", { containers: [runner()] }) }),
       ...(process.env.ANTHROPIC_API_KEY && { ANTHROPIC_API_KEY: Redacted.make(process.env.ANTHROPIC_API_KEY) }),
       ...(process.env.TICKET_SECRET && { TICKET_SECRET: Redacted.make(process.env.TICKET_SECRET) }),
+      // Sign-in with WorkOS (live mode). Without them, live mode refuses every sign-in and says what's missing.
+      ...(process.env.WORKOS_API_KEY && { WORKOS_API_KEY: Redacted.make(process.env.WORKOS_API_KEY) }),
+      ...(process.env.WORKOS_CLIENT_ID && { WORKOS_CLIENT_ID: process.env.WORKOS_CLIENT_ID }),
+      ...(process.env.WORKOS_COOKIE_PASSWORD && { WORKOS_COOKIE_PASSWORD: Redacted.make(process.env.WORKOS_COOKIE_PASSWORD) }),
+      ...(process.env.APP_URL && { APP_URL: process.env.APP_URL }),
       // Ticketless "dev owner" access only ever exists in dev stages.
       AUTH_MODE: stack.stage.startsWith("dev") ? "dev" : "live",
       // Dev answers localhost only; this lets a tunnel host in too (see dev-guard.ts).

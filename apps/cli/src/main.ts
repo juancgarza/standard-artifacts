@@ -16,7 +16,7 @@ import { folderPath, imageMarkdown, parseFolderPath, type CellValue } from "@sta
  * it's the same API, validation and permissions as the web app and MCP.
  *
  *   STDARTIFACTS_URL    app URL (default http://localhost:5173)
- *   STDARTIFACTS_TOKEN  ticket from the account service
+ *   STDARTIFACTS_TOKEN  access token (Settings → Access tokens on a server with sign-in)
  *   STDARTIFACTS_AS     dev only: guest | viewer | agent
  */
 

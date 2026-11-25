@@ -16,8 +16,10 @@
     // "dev" lets requests without a ticket act as a local owner. Never set in production.
     // Dev mode is localhost-only: the Worker refuses any other Host or Origin with a 403.
     // DEV_ALLOWED_HOSTS (comma-separated) lets named hosts in, which exposes the workspace
-    // to whoever reaches them. A networked celld deploy needs live mode with sign-in
-    // (AUTH_MODE "live" plus TICKET_SECRET and an account service), which isn't built yet.
+    // to whoever reaches them. A networked celld deploy needs live mode with sign-in:
+    // AUTH_MODE "live" plus the secrets TICKET_SECRET, WORKOS_API_KEY and
+    // WORKOS_COOKIE_PASSWORD, and the vars WORKOS_CLIENT_ID and APP_URL
+    // (see "Self-hosting with sign-in" in docs/development.md).
     "AUTH_MODE": "dev"
     // Optional, for content search: TURBOPUFFER_API_KEY (a secret, not a var), TURBOPUFFER_URL, SEARCH_PREFIX.
   },

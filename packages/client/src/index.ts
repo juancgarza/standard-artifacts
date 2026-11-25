@@ -66,9 +66,12 @@ export class StandardArtifactsError extends Schema.TaggedError<StandardArtifacts
 export interface Connection {
   /** Base URL of the app, e.g. http://localhost:5173 */
   readonly url: string
-  /** HMAC ticket from the account service. */
+  /** An access token (`sat_…`, from Settings → Access tokens on a server with sign-in), or an HMAC ticket. */
   readonly token?: Redacted.Redacted<string> | undefined
-  /** Dev only: act as "agent" | "guest" | "viewer" (honored when the server runs AUTH_MODE=dev). */
+  /**
+   * Dev: act as "agent" | "guest" | "viewer" (honored when the server runs AUTH_MODE=dev).
+   * With an access token, "agent" acts as an agent for the token's owner.
+   */
   readonly as?: string | undefined
   /**
    * The fetch to send requests with (default: the global one). The Worker's

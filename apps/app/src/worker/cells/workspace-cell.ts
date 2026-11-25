@@ -6,6 +6,7 @@ import {
   folderProblem,
   sharePath,
   targetKey,
+  type ApiToken,
   type ArtifactAccess,
   type OrgDirectory,
   type ShareLink,
@@ -655,6 +656,77 @@ export class WorkspaceCell extends DurableObject<Env> {
     return { ok: true, value: null }
   }
 
+  // --- Personal access tokens ---------------------------------------------------------------
+
+  /**
+   * `api_tokens` holds a hash of each token, never the token. A token acts as the
+   * person who made it, with their role in the org, which the Worker checks with
+   * the account service every few minutes (`checked_at`).
+   */
+  private apiTokens() {
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS api_tokens (
+      id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, user_id TEXT NOT NULL, user_name TEXT NOT NULL, name TEXT NOT NULL,
+      role TEXT NOT NULL, checked_at INTEGER NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT)`)
+  }
+
+  /** The caller's own tokens. Only people have them: not agents or guests. */
+  listTokens(p: Principal): CellResult<Array<ApiToken>> {
+    if (p.actor.type !== "user") return { ok: false, reason: "forbidden", error: "Only people have access tokens" }
+    this.apiTokens()
+    const rows = this.sql.exec<TokenRow>("SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC", p.actor.id).toArray()
+    return { ok: true, value: rows.map(toToken) }
+  }
+
+  /** Store a new token's hash (the Worker makes the token, since it knows the org). */
+  createToken(p: Principal, input: { id: string; hash: string; name: string }): CellResult<ApiToken> {
+    if (p.actor.type !== "user") return { ok: false, reason: "forbidden", error: "Only people can create access tokens" }
+    this.apiTokens()
+    this.rememberOrg(p)
+    const count = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?", p.actor.id).one().n
+    if (count >= MAX_TOKENS_PER_PERSON) return { ok: false, reason: "forbidden", error: `You have ${MAX_TOKENS_PER_PERSON} tokens. Revoke one first.` }
+    const row = this.sql
+      .exec<TokenRow>(
+        "INSERT INTO api_tokens (id, hash, user_id, user_name, name, role, checked_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+        input.id, input.hash, p.actor.id, p.actor.name, input.name, p.role, Date.now(), new Date().toISOString(),
+      )
+      .toArray()[0]
+    return row ? { ok: true, value: toToken(row) } : notFound()
+  }
+
+  /** Revoke one of the caller's tokens. It stops working on its next request. */
+  revokeToken(p: Principal, id: string): CellResult<null> {
+    if (p.actor.type !== "user") return { ok: false, reason: "forbidden", error: "Only people have access tokens" }
+    this.apiTokens()
+    const gone = this.sql.exec("DELETE FROM api_tokens WHERE id = ? AND user_id = ? RETURNING id", id, p.actor.id).toArray()
+    return gone.length ? { ok: true, value: null } : notFound()
+  }
+
+  /** Someone left the org (or was removed): every token of theirs stops working. */
+  revokeUserTokens(userId: string): number {
+    this.apiTokens()
+    return this.sql.exec("DELETE FROM api_tokens WHERE user_id = ? RETURNING id", userId).toArray().length
+  }
+
+  /** Look a token up by its hash, for the Worker's auth. Null when it was revoked. */
+  resolveToken(hash: string): ResolvedToken | null {
+    this.apiTokens()
+    const row = this.sql.exec<TokenRow>("SELECT * FROM api_tokens WHERE hash = ?", hash).toArray()[0]
+    const org = this.org()
+    if (!row || !org) return null
+    // Last used, to the minute: enough to spot a token nobody uses, without a write per request.
+    const now = new Date()
+    if (!row.last_used_at || now.getTime() - Date.parse(row.last_used_at) > 60_000) {
+      this.sql.exec("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", now.toISOString(), row.id)
+    }
+    return { id: row.id, name: row.name, userId: row.user_id, userName: row.user_name, role: row.role, checkedAt: row.checked_at, ...org }
+  }
+
+  /** The account service confirmed a person's role: their tokens act with it until the next check. */
+  tokenRoleChecked(userId: string, role: Principal["role"]) {
+    this.apiTokens()
+    this.sql.exec("UPDATE api_tokens SET role = ?, checked_at = ? WHERE user_id = ?", role, Date.now(), userId)
+  }
+
   /** Resolve a share token (for the Worker's auth). Null when it was turned off or its artifact is gone. */
   link(token: string): { artifactId: string; kind: Artifact["kind"]; orgName: string; plan: Principal["plan"] } | null {
     this.sharing()
@@ -663,6 +735,20 @@ export class WorkspaceCell extends DurableObject<Env> {
     return row && artifact ? { artifactId: artifact.id, kind: artifact.kind, orgName: row.org_name, plan: row.plan } : null
   }
 }
+
+type TokenRow = {
+  id: string; hash: string; user_id: string; user_name: string; name: string; role: Principal["role"]; checked_at: number; created_at: string; last_used_at: string | null
+}
+
+/** What a token resolves to: the person, their last-checked role, and the org. */
+export type ResolvedToken = {
+  id: string; name: string; userId: string; userName: string; role: Principal["role"]; checkedAt: number
+  orgId: string; orgName: string; plan: Principal["plan"]
+}
+
+const toToken = (r: TokenRow): ApiToken => ({ id: r.id, name: r.name, createdAt: r.created_at, lastUsedAt: r.last_used_at })
+
+const MAX_TOKENS_PER_PERSON = 50
 
 type PrincipalRow = { key: string; type: "user" | "agent"; id: string; name: string; on_behalf_of: string | null; role: Principal["role"]; last_seen: string }
 type LinkRow = { token: string; artifact_id: string; role: "viewer"; created_by: string; org_name: string; plan: Principal["plan"]; created_at: string }
