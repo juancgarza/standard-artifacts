@@ -6,7 +6,7 @@
 ```sh
 pnpm dev                                               # the app, as usual
 pnpm --filter @standard-artifacts/desktop dev          # a window on http://localhost:5173 (STDARTIFACTS_DESKTOP_URL to change it)
-pnpm --filter @standard-artifacts/desktop package:dir  # an ad-hoc-signed .app in release/, which loads standardartifacts.com
+pnpm --filter @standard-artifacts/desktop package:dir  # an ad-hoc-signed .app in release/, which loads app.standardartifacts.com
 pnpm --filter @standard-artifacts/desktop package      # installers; needs a Developer ID to run on other Macs
 ```
 

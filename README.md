@@ -61,7 +61,7 @@ Type `@claude` in a doc, a board note or a table cell, and an agent picks the re
 
 | | **Solo** (open source) | **Cloud** (coming soon) |
 |---|---|---|
-| Runs on | your machine, `npx stdartifacts serve` | standardartifacts.com |
+| Runs on | your machine, `npx stdartifacts serve` | app.standardartifacts.com |
 | People | you, plus any number of agents | your team, with sign-in and roles |
 | Agents | Claude Code, Codex and scripts over local MCP; `stdartifacts agent serve` answers `@claude` | the same, plus ChatGPT and Claude connectors, and hosted `@claude` runs |
 | Price | free | per team |

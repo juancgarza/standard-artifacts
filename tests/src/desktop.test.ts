@@ -20,12 +20,12 @@ const until = (check: () => Promise<unknown>, timeout?: number) =>
   }, timeout)
 
 describe("links", () => {
-  const origin = "https://standardartifacts.com"
+  const origin = "https://app.standardartifacts.com"
 
   test("only the app's own origin stays in the app", () => {
-    assert.equal(destinationOf("https://standardartifacts.com/docs/d_1", origin), "in-app")
-    assert.equal(destinationOf("https://standardartifacts.com.evil.dev/", origin), "external")
-    assert.equal(destinationOf("http://standardartifacts.com/", origin), "external")
+    assert.equal(destinationOf("https://app.standardartifacts.com/docs/d_1", origin), "in-app")
+    assert.equal(destinationOf("https://app.standardartifacts.com.evil.dev/", origin), "external")
+    assert.equal(destinationOf("http://app.standardartifacts.com/", origin), "external")
     assert.equal(destinationOf("mailto:a@b.co", origin), "external")
   })
 

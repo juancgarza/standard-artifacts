@@ -15,7 +15,42 @@ import * as Redacted from "effect/Redacted"
  *                   :5173 proxying /api (and room sockets) to it. No cloud calls.
  *   alchemy deploy  builds the SPA and the agent runner's image, and deploys both
  *                   to Cloudflare. The image build needs Docker.
+ *
+ * Stages: dev* runs locally (AUTH_MODE=dev, no sign-in). staging and prod are the hosted app,
+ * deployed by .github/workflows/deploy.yml; see "Deploying Cloud" in docs/development.md.
  */
+
+/**
+ * Hosted stages and their hostnames, on the standardartifacts.com zone (which must be in the
+ * deploying account). The apex and www are the landing page (apps/landing). Any other non-dev
+ * stage gets only a workers.dev URL.
+ */
+const ZONE = "standardartifacts.com"
+const HOSTNAMES: Partial<Record<string, string>> = {
+  staging: `staging.${ZONE}`,
+  prod: `app.${ZONE}`,
+}
+
+/** A hosted stage's custom domain, with workers.dev off so the app has one origin (no preview URLs either). */
+const hostedDomain = (stage: string) => {
+  const name = HOSTNAMES[stage]
+  return name ? { domain: { name, zoneName: ZONE }, workersDev: false } : {}
+}
+
+/**
+ * Deploy state: resource ids, and the random suffix in every physical name (the Worker, and so
+ * its Durable Object namespaces). Losing it means the next deploy creates a new, empty Worker.
+ * Dev stages keep it in apps/app/.alchemy, next to their local data; everything else uses the
+ * Cloudflare State Store (a Worker named alchemy-state-store in the deploying account), so CI and
+ * laptops share it.
+ */
+const state = Layer.unwrap(
+  Effect.gen(function* () {
+    const stage = yield* Alchemy.Stage
+    return stage.startsWith("dev") ? Alchemy.localState() : Cloudflare.state()
+  }),
+)
+
 /** The image for hosted agent runs. Only built when a stage binds it, so dev never needs Docker. */
 const runner = () =>
   Cloudflare.Container("Runner", {
@@ -56,6 +91,7 @@ export const App = Cloudflare.Website.StaticSite(
       ...(process.env.TURBOPUFFER_URL && { TURBOPUFFER_URL: process.env.TURBOPUFFER_URL }),
     },
     assets: { notFoundHandling: "single-page-application", runWorkerFirst: ["/api/*", "/mcp"] },
+    ...hostedDomain(stack.stage),
     dev: { port: 1337, strictPort: true },
   })),
 )
@@ -65,7 +101,7 @@ export default Alchemy.Stack(
   "AhComponents",
   {
     providers: Layer.mergeAll(Cloudflare.providers(), Command.providers()),
-    state: Alchemy.localState(),
+    state,
   },
   Effect.gen(function* () {
     const app = yield* App

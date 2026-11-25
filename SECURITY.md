@@ -9,7 +9,7 @@ Please don't open a public issue. Report it privately:
 
 Include what you found, how to reproduce it, and what an attacker could do with it. We'll acknowledge your report within 3 business days and keep you updated until it's fixed. We'll credit you in the release notes unless you'd rather not be named. Please give us a reasonable chance to fix the problem before you disclose it.
 
-**Supported versions:** fixes land on `main` and in the latest release. The hosted service at standardartifacts.com always runs a current build.
+**Supported versions:** fixes land on `main` and in the latest release. The hosted service at app.standardartifacts.com always runs a current build.
 
 ## Security model
 

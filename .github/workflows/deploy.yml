@@ -1,0 +1,95 @@
+name: Deploy
+
+# Standard Artifacts Cloud. A push to main deploys staging (staging.standardartifacts.com);
+# running this from the Actions tab deploys prod (app.standardartifacts.com), or staging again.
+# Secrets live in the GitHub environments `staging` and `production`, and only the deploy job
+# reads them. Setup, secrets and rollback: "Deploying Cloud" in docs/development.md.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Stage to deploy"
+        type: choice
+        options: [prod, staging]
+        default: prod
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # Forks don't deploy. Only main deploys, whatever the trigger.
+    if: github.repository == 'juancgarza/standard-artifacts' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      stage: ${{ steps.stage.outputs.stage }}
+      environment: ${{ steps.stage.outputs.environment }}
+      url: ${{ steps.stage.outputs.url }}
+    steps:
+      - id: stage
+        env:
+          STAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.stage || 'staging' }}
+        run: |
+          case "$STAGE" in
+            prod)    echo "stage=prod" >> "$GITHUB_OUTPUT"; echo "environment=production" >> "$GITHUB_OUTPUT"; echo "url=https://app.standardartifacts.com" >> "$GITHUB_OUTPUT" ;;
+            staging) echo "stage=staging" >> "$GITHUB_OUTPUT"; echo "environment=staging" >> "$GITHUB_OUTPUT"; echo "url=https://staging.standardartifacts.com" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unknown stage: $STAGE" >&2; exit 1 ;;
+          esac
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: ${{ needs.check.outputs.environment }}
+      url: ${{ needs.check.outputs.url }}
+    # One deploy per stage at a time, and never cancel one halfway: Alchemy writes state as it goes.
+    concurrency:
+      group: deploy-${{ needs.check.outputs.stage }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Builds the SPA and the agent runner's image (Docker and buildx come with ubuntu-latest),
+      # then deploys. State lives in the Cloudflare State Store, which --yes creates on the
+      # first deploy to an account (and upgrades when Alchemy needs a newer one).
+      - name: alchemy deploy
+        working-directory: apps/app
+        env:
+          STAGE: ${{ needs.check.outputs.stage }}
+          APP_URL: ${{ needs.check.outputs.url }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TICKET_SECRET: ${{ secrets.TICKET_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WORKOS_API_KEY: ${{ secrets.WORKOS_API_KEY }}
+          WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+          WORKOS_COOKIE_PASSWORD: ${{ secrets.WORKOS_COOKIE_PASSWORD }}
+          TURBOPUFFER_API_KEY: ${{ secrets.TURBOPUFFER_API_KEY }}
+          TURBOPUFFER_URL: ${{ secrets.TURBOPUFFER_URL }}
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID TICKET_SECRET; do
+            if [ -z "${!name}" ]; then echo "::error::$name isn't set in the $STAGE environment" >&2; exit 1; fi
+          done
+          pnpm exec alchemy deploy --stage "$STAGE" --yes

@@ -12,7 +12,7 @@ import { loadWindowState, saveWindowState } from "./window-state"
  * from the API. The app needs its server to do anything, so bundling the UI wouldn't
  * buy offline use. Only local dev can point it elsewhere.
  */
-const appUrl = new URL((!app.isPackaged && process.env.STDARTIFACTS_DESKTOP_URL) || (app.isPackaged ? "https://standardartifacts.com" : "http://localhost:5173"))
+const appUrl = new URL((!app.isPackaged && process.env.STDARTIFACTS_DESKTOP_URL) || (app.isPackaged ? "https://app.standardartifacts.com" : "http://localhost:5173"))
 const appOrigin = appUrl.origin
 const isMac = process.platform === "darwin"
 const SHOW_WITHIN_MS = 1_000
