@@ -39,9 +39,26 @@ stdartifacts restore Leads                            # bring it back (stdartifa
 claude mcp add stdartifacts -- node $PWD/apps/cli/dist/stdartifacts.mjs mcp
 ```
 
+### Access tokens (live servers)
+
+A server with sign-in (Standard Artifacts Cloud, or self-hosted with WorkOS) needs a token for the CLI and MCP. Create one under **Settings → Access tokens**; it's shown once. Then:
+
+```sh
+export STDARTIFACTS_URL=https://app.example.com
+export STDARTIFACTS_TOKEN=sat_…
+stdartifacts ls
+claude mcp add stdartifacts -e STDARTIFACTS_URL=https://app.example.com -e STDARTIFACTS_TOKEN=$STDARTIFACTS_TOKEN -- npx stdartifacts mcp
+claude mcp add --transport http stdartifacts https://app.example.com/mcp --header "Authorization: Bearer $STDARTIFACTS_TOKEN"
+```
+
+- A token acts as you, in the workspace you created it in, with your current role. If an owner changes your role, the token follows within 5 minutes. If you leave the workspace, it stops working.
+- Under `stdartifacts mcp`, and over remote MCP, the same token acts as an agent for you, named after the token ("Claude Code"), never above editor. `STDARTIFACTS_AS=agent` does the same for the CLI.
+- Only a hash is stored. Revoke a token in Settings and it stops working on its next request. A token can't create more tokens.
+- A dev server (`pnpm dev`, `stdartifacts serve`) needs no token.
+
 ### Remote MCP (Codex, ChatGPT)
 
-The Worker serves the same tools over Streamable HTTP at `/mcp`. It authenticates each request (`Authorization: Bearer <ticket>`) and hands it to that principal's `McpCell`, a Durable Object that keeps the MCP sessions and calls the API in-process. Edits go through the same permissions as everything else, so a viewer's session can read but not write. In dev, requests without `x-dev-as` act as an agent.
+The Worker serves the same tools over Streamable HTTP at `/mcp`. It authenticates each request (`Authorization: Bearer <token>`, an access token or a ticket) and hands it to that principal's `McpCell`, a Durable Object that keeps the MCP sessions and calls the API in-process. Edits go through the same permissions as everything else, so a viewer's session can read but not write. In dev, requests without `x-dev-as` act as an agent.
 
 Codex (`~/.codex/config.toml`):
 
@@ -59,4 +76,4 @@ What ChatGPT gets beyond the tools:
 - **Resources.** `resources/read` on `stdartifacts://board/b_…` (or `table`, `doc`) returns the artifact as compact text, the same as `read_artifact`.
 - **Read-only hints.** Reads are marked `readOnlyHint`, so hosts can run them without asking.
 
-Configuration: `STDARTIFACTS_URL` (default http://localhost:5173), `STDARTIFACTS_TOKEN` (ticket), and `STDARTIFACTS_AS` (dev only: guest, viewer or agent).
+Configuration: `STDARTIFACTS_URL` (default http://localhost:5173), `STDARTIFACTS_TOKEN` (an access token from Settings, or a ticket), and `STDARTIFACTS_AS` (dev: guest, viewer or agent; with an access token, only agent applies).

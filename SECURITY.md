@@ -20,8 +20,15 @@ People and agents edit the same artifacts, and boards run HTML that someone else
 - **Principals.** Every request resolves to a principal: an org, an actor (a person, an agent acting for a person, or a share-link guest) and a role (owner, editor or viewer).
   - Viewers and guests are read-only. The cell rejects their ops.
   - Agents act on behalf of a person and never have more access than that person.
-- **Tickets.** In live mode, the Worker signs HMAC tickets with `TICKET_SECRET`, and every API, WebSocket and MCP request must carry a valid one.
-- **Isolation between orgs.** Cells are named `<org>:<artifact>`, so a principal can't address another org's artifact.
+- **Tickets.** In live mode, the Worker signs HMAC tickets with `TICKET_SECRET`, and every API, WebSocket and MCP request must carry a valid one (or an access token or share link, below). Tickets last 5 minutes and can't be revoked.
+- **Sign-in** (live mode) goes through WorkOS AuthKit. WorkOS is the source of truth for orgs, members and roles.
+  - The session is an httpOnly, SameSite=Lax, Secure cookie, sealed with AES-GCM under `WORKOS_COOKIE_PASSWORD`. It holds a WorkOS refresh token and never reaches a cell.
+  - The sign-in round trip is bound to the browser by a sealed state cookie, and `return_to` only accepts paths on the app.
+  - `/api/auth/*` POSTs are refused when their Origin is another site.
+  - Live mode with missing sign-in config refuses sign-in and says why. It never falls back to dev mode.
+- **Members.** Only owners invite, change roles and remove people, and the Worker checks with WorkOS that the caller is still an owner before each change. A membership or invitation from another org reads as not found. The last owner can't be removed or demoted.
+- **Access tokens** (`sat_…`) act as one person in one org. Only a SHA-256 hash is stored. The person's role is checked with WorkOS every 5 minutes, and the tokens of someone who left the org stop working. Agents, guests and other tokens can't create tokens.
+- **Isolation between orgs.** Cells are named `<org>:<artifact>`, and the org comes only from a signed ticket, a token's stored hash, or a share link's cell, so a principal can't address another org's artifact.
 - **Share links** give a read-only guest access to one artifact. An owner can turn a link off.
 
 ### Dev mode (solo)
@@ -69,7 +76,8 @@ The renderer is sandboxed with context isolation. The page can only *receive* co
 
 ## Known limitations
 
-- **No hosted sign-in yet.** Until it ships, self-hosted servers run only in dev mode (solo, localhost) or behind your own auth in front of live mode.
+- **Changes take minutes to land.** A ticket can't be revoked, and the session's WorkOS access token is reused until it nearly expires. A removed member or a lowered role reaches new tickets within about 5 minutes, and old tickets expire within 5 more. A socket that's already open stays open until it disconnects.
+- **Access tokens don't expire.** They last until revoked, or until their owner leaves the org.
 - **https images load in viewers' browsers.** Embeds and design frames can load images over `https:`. Whoever controls an image's URL can see who viewed it and when, and a URL can carry data in its path.
 - **GET requests can carry data.** A hosted run's GET-only web access limits a prompt-injected page, but a URL can still carry data out.
 - **The remote MCP endpoint** (`/mcp`) uses bearer tickets. OAuth for ChatGPT and Claude connectors isn't built yet.

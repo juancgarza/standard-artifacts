@@ -15,6 +15,35 @@ To just use it, without a clone: `npx stdartifacts serve` runs the whole app on 
 
 Dev mode has no sign-in: anyone who can reach the server is the owner. It answers only localhost; `DEV_ALLOWED_HOSTS` (comma-separated) adds hosts, for example a tunnel. See [SECURITY.md](../SECURITY.md).
 
+## Self-hosting with sign-in
+
+Live mode (`AUTH_MODE=live`, the default outside dev stages) signs people in with [WorkOS](https://workos.com) AuthKit, and uses WorkOS Organizations for orgs, members, roles and invitations. This is how Standard Artifacts Cloud runs. [Architecture](architecture.md#access-model) explains the session, tickets and ids.
+
+**In the WorkOS dashboard** (try it in the Staging environment first):
+
+1. **Authentication.** Turn on AuthKit, with the sign-in methods you want.
+2. **Redirects** (Applications → Redirects).
+   - Redirect URI: `<APP_URL>/api/auth/callback`, for example `https://app.example.com/api/auth/callback`.
+   - Initiate login URI (where AuthKit sends people whose sign-in didn't start in the app, such as from an invitation or a password reset): `<APP_URL>/api/auth/login`.
+   - Sign-out URI: `<APP_URL>/`. Without it, signing out ends on a WorkOS error page.
+3. **Roles.** Create three roles with the slugs `owner`, `editor` and `viewer`, and make `editor` the default role for new members. Without them the app falls back to WorkOS's default `admin` (owner) and `member` (editor) roles; inviting a viewer then fails with a message saying the role is missing, rather than granting more. Any other slug counts as viewer.
+4. **Organizations.** Nothing to create: someone who signs in without one gets "<First name>'s workspace" as its owner. An org's plan is its metadata key `plan` (`free`, the default, or `team`).
+5. **Invitations.** Owners invite from Settings → Members, and WorkOS sends the email. Its link signs the person in through AuthKit and lands them in that org. If you point the invitation link at the app instead, `<APP_URL>/?invitation_token=…` works too.
+
+**Configuration** (in the Worker's environment; for Alchemy deploys, the shell or CI environment running `alchemy deploy`, such as GitHub environment secrets):
+
+| Variable | |
+| --- | --- |
+| `TICKET_SECRET` | Secret. Signs tickets. Any long random string: `openssl rand -base64 32`. |
+| `WORKOS_API_KEY` | Secret. `sk_…` from API Keys. |
+| `WORKOS_CLIENT_ID` | `client_…` from API Keys. |
+| `WORKOS_COOKIE_PASSWORD` | Secret. Seals the session cookie. At least 32 characters: `openssl rand -base64 32`. Changing it signs everyone out. |
+| `APP_URL` | The address people use, like `https://app.example.com`. Redirect URIs are built from it. Without it, the request's own origin is used, which is wrong behind a proxy that changes the host. |
+
+If any of these is missing in live mode, nothing falls back to dev: the sign-in screen and `/api/auth/*` say exactly what's missing, and the API refuses requests without a valid ticket or token. Serve live mode over HTTPS: the session cookie is `Secure` everywhere except plain http to localhost. On celld, set the same names in `wrangler.jsonc` (`vars`) and as secrets.
+
+The tests run live mode without WorkOS: `tests/src/live-harness.ts` starts the built server in Miniflare against a fake WorkOS (`tests/src/fake-workos.ts`).
+
 ## Tests
 
 `tests/` holds the API, CLI and MCP, two-browser UI and desktop suites. They run against local dev with Node's test runner and Playwright driving Google Chrome. CI (`.github/workflows/ci.yml`) runs `pnpm typecheck` and `pnpm test` on every pull request.
