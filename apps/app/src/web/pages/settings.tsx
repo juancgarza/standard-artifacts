@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
+import { Heading, ListSkeleton, Row, Rows, Snippet, roles } from "../components/settings-parts"
 import { Link, useParams } from "@tanstack/react-router"
 import {
   BuildingsIcon,
-  CheckIcon,
-  CopyIcon,
   DesktopIcon,
+  KeyIcon,
   MoonIcon,
   PaletteIcon,
   RobotIcon,
@@ -14,14 +14,16 @@ import {
   type IconProps,
 } from "@phosphor-icons/react"
 import { BrandTile, brandOf } from "@standard-artifacts/room/brands"
-import { colorFor, type OrgDirectory, type Principal, type Role } from "@standard-artifacts/protocol"
+import { colorFor, type OrgDirectory, type Principal } from "@standard-artifacts/protocol"
 import { Initial } from "../components/share-dialog"
 import { SidebarToggle } from "../components/sidebar-collapse"
 import { setTheme, useTheme, type Theme } from "../theme"
 import { timeAgo } from "../time"
 import { useWorkspace, type DevAs } from "../workspace"
+import { Avatar } from "../components/account-menu"
+import { AccessTokens, LiveMembers } from "./settings-account"
 
-type SectionId = "profile" | "appearance" | "general" | "members" | "agents"
+type SectionId = "profile" | "appearance" | "tokens" | "general" | "members" | "agents"
 type NavGroup = { label: string; items: ReadonlyArray<{ id: SectionId; label: string; icon: ComponentType<IconProps> }> }
 
 const groups: ReadonlyArray<NavGroup> = [
@@ -30,6 +32,7 @@ const groups: ReadonlyArray<NavGroup> = [
     items: [
       { id: "profile", label: "Profile", icon: UserIcon },
       { id: "appearance", label: "Appearance", icon: PaletteIcon },
+      { id: "tokens", label: "Access tokens", icon: KeyIcon },
     ],
   },
   {
@@ -45,17 +48,15 @@ const groups: ReadonlyArray<NavGroup> = [
 /** A guest has no account and isn't a member, so all that's theirs to set is how the page looks. */
 const guestGroups: ReadonlyArray<NavGroup> = [{ label: "Personal", items: groups[0]!.items.filter((s) => s.id === "appearance") }]
 
-const roles: Record<Role, { label: string; help: string }> = {
-  owner: { label: "Owner", help: "Edits everything and looks after the workspace." },
-  editor: { label: "Editor", help: "Edits everything and turns share links on or off." },
-  viewer: { label: "Viewer", help: "Opens everything but can't change it." },
-}
 
 /** Personal and workspace settings. A normal page, so it takes a tab like any other and links can point at a section. */
+/** Access tokens need an account: a dev server has none (its CLI and MCP need no token). */
+const devGroups: ReadonlyArray<NavGroup> = groups.map((g) => ({ ...g, items: g.items.filter((s) => s.id !== "tokens") }))
+
 export function SettingsPage() {
-  const { principal } = useWorkspace()
+  const { principal, account } = useWorkspace()
   const { section } = useParams({ from: "/settings/{-$section}" })
-  const visible = principal?.actor.type === "guest" ? guestGroups : groups
+  const visible = principal?.actor.type === "guest" ? guestGroups : account ? groups : devGroups
   const items = visible.flatMap((g) => g.items)
   const active = items.find((s) => s.id === section) ?? items[0]!
 
@@ -110,6 +111,7 @@ function SectionNav({ groups, active }: { groups: ReadonlyArray<NavGroup>; activ
 }
 
 function Section({ id, principal }: { id: SectionId; principal: Principal }) {
+  const { account } = useWorkspace()
   switch (id) {
     case "profile":
       return <Profile principal={principal} />
@@ -117,45 +119,13 @@ function Section({ id, principal }: { id: SectionId; principal: Principal }) {
       return <Appearance />
     case "general":
       return <General principal={principal} />
+    case "tokens":
+      return <AccessTokens principal={principal} />
     case "members":
-      return <Members principal={principal} />
+      return account ? <LiveMembers principal={principal} /> : <Members principal={principal} />
     case "agents":
       return <Agents principal={principal} />
   }
-}
-
-// --- Layout -------------------------------------------------------------------------
-
-function Heading({ title, children }: { title: string; children?: ReactNode }) {
-  return (
-    <header>
-      <h2 className="text-[16px] font-semibold">{title}</h2>
-      {children && <p className="mt-1 text-[13px] text-muted">{children}</p>}
-    </header>
-  )
-}
-
-/** A group of rows; `title` labels it when a section has more than one. */
-function Rows({ title, children }: { title?: string; children: ReactNode }) {
-  return (
-    <section className="mt-5">
-      {title && <h3 className="mb-2 text-[13px] font-medium">{title}</h3>}
-      <div className="divide-y divide-border border-y border-border">{children}</div>
-    </section>
-  )
-}
-
-/** Text on the left, the value or control on the right; they stack when there's no room. */
-function Row({ label, help, children }: { label: string; help?: ReactNode; children: ReactNode }) {
-  return (
-    <div className="flex min-h-12 flex-wrap items-center justify-between gap-x-6 gap-y-2 py-2.5">
-      <div className="min-w-0 flex-[1_1_220px]">
-        <div className="font-medium">{label}</div>
-        {help && <p className="mt-0.5 text-[13px] text-muted">{help}</p>}
-      </div>
-      <div className="min-w-0 text-muted">{children}</div>
-    </div>
-  )
 }
 
 /**
@@ -185,6 +155,7 @@ function DevViewAs() {
 // --- Sections -----------------------------------------------------------------------
 
 function Profile({ principal }: { principal: Principal }) {
+  const { account } = useWorkspace()
   const { actor, role } = principal
   const name = actor.type === "user" ? actor.name : actor.type === "agent" ? (actor.name ?? "Agent") : "Guest"
   return (
@@ -193,10 +164,15 @@ function Profile({ principal }: { principal: Principal }) {
       <Rows>
         <Row label="Name">
           <span className="flex items-center gap-2.5 text-text">
-            <Initial name={name} color={colorFor(actor.id)} />
+            {account ? <Avatar name={name} id={actor.id} url={account.user.avatarUrl} size={32} /> : <Initial name={name} color={colorFor(actor.id)} />}
             {name}
           </span>
         </Row>
+        {account && (
+          <Row label="Email">
+            <span className="text-text">{account.user.email}</span>
+          </Row>
+        )}
         <Row label="Role" help={roles[role].help}>
           {roles[role].label}
         </Row>
@@ -285,19 +261,6 @@ function useDirectory() {
   return { directory, error }
 }
 
-function ListSkeleton() {
-  return (
-    <div className="space-y-3 py-3" aria-busy="true">
-      {[0, 1].map((i) => (
-        <div key={i} className="flex items-center gap-3">
-          <span className="size-8 animate-pulse rounded-full bg-active" />
-          <span className="h-3 w-40 animate-pulse rounded bg-active" />
-        </div>
-      ))}
-    </div>
-  )
-}
-
 function ListRow({ avatar, name, detail, role }: { avatar: ReactNode; name: ReactNode; detail: string; role: string }) {
   return (
     <li className="flex min-h-13 items-center gap-3 py-2">
@@ -341,7 +304,10 @@ function Members({ principal }: { principal: Principal }) {
           </ul>
         )}
       </Rows>
-      <p className="mt-3 text-[13px] text-muted">Email invites and role changes aren't available yet. To show someone your work, share a view-only link from any artifact.</p>
+      <p className="mt-3 text-[13px] text-muted">
+        This server has no sign-in, so there's no one to invite. To show someone your work, share a view-only link from any artifact. With sign-in (Standard Artifacts Cloud, or
+        self-hosted with WorkOS), owners invite people here and choose their roles.
+      </p>
     </>
   )
 }
@@ -415,43 +381,18 @@ function Connect() {
         )}
       </Rows>
       <p className="mt-3 text-[13px] text-muted">
-        {live
-          ? "Each request needs a token, and you can't create one here yet."
-          : "This server has no sign-in, so agents on this machine connect without a token. It only answers requests from this machine."}
+        {live ? (
+          <>
+            Each request needs a token.{" "}
+            <Link to="/settings/{-$section}" params={{ section: "tokens" }} className="text-accent hover:underline">
+              Create one under Access tokens
+            </Link>
+            , then set STDARTIFACTS_TOKEN to it.
+          </>
+        ) : (
+          "This server has no sign-in, so agents on this machine connect without a token. It only answers requests from this machine."
+        )}
       </p>
     </>
-  )
-}
-
-function Snippet({ label, help, code }: { label: string; help?: string; code: string }) {
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle")
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setState("copied")
-    } catch {
-      setState("failed")
-    }
-    setTimeout(() => setState("idle"), 1600)
-  }
-  return (
-    <div className="py-3">
-      <div className="flex items-baseline gap-2">
-        <span className="font-medium">{label}</span>
-        {help && <span className="min-w-0 text-[13px] text-muted">{help}</span>}
-      </div>
-      <div className="mt-1.5 flex items-start gap-1 rounded-md bg-surface py-1 pr-1 pl-3">
-        <code className="min-w-0 flex-1 overflow-x-auto py-1 font-mono text-[12px] leading-5 whitespace-pre">{code}</code>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          aria-label={`Copy ${label} setup`}
-          title={state === "failed" ? "Couldn't copy. Select the text instead." : "Copy"}
-          className="grid size-7 shrink-0 place-items-center rounded text-muted hover:bg-hover hover:text-text"
-        >
-          {state === "copied" ? <CheckIcon size={14} weight="bold" className="text-table" /> : <CopyIcon size={14} />}
-        </button>
-      </div>
-    </div>
   )
 }

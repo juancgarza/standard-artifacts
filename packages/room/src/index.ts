@@ -35,6 +35,17 @@ export interface RoomOptions<S, O> {
 
 type Pending<O> = { id: string; op: O }
 
+let authorize: ((url: string) => string) | undefined
+
+/**
+ * Rewrite every room's address right before it connects or reconnects. The app
+ * uses it to add a fresh `?ticket=` (browsers can't set headers on sockets),
+ * so a reconnect after the ticket rotated doesn't use an expired one.
+ */
+export function authorizeRooms(rewrite: ((url: string) => string) | undefined) {
+  authorize = rewrite
+}
+
 export class RoomClient<S, O> {
   private ws: WebSocket | null = null
   private confirmed: S | null = null
@@ -66,7 +77,7 @@ export class RoomClient<S, O> {
     this.closedByUser = false
     if (this.ws) return
     if (this.snapshot.status === "closed") this.emit({ status: "connecting" })
-    const ws = new WebSocket(this.options.url)
+    const ws = new WebSocket(authorize ? authorize(this.options.url) : this.options.url)
     this.ws = ws
     ws.onmessage = (e) => this.onMessage(JSON.parse(String(e.data)) as ServerMessage<S, O>)
     ws.onclose = (e) => {

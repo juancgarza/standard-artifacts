@@ -1,14 +1,20 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Effect } from "effect"
 import { actorKey, canEdit, type Artifact, type ArtifactKind, type Folder, type OrgDirectory, type Principal, type RoomContent, type UpdateFolder } from "@standard-artifacts/protocol"
-import { api, errorMessage } from "./api"
+import { api, errorMessage, isUnauthorized } from "./api"
+import { startSession, useSession, withTicket, type SignedIn } from "./session"
 
 export type DevAs = "owner" | "viewer" | "guest"
 
 type Workspace = {
-  status: "loading" | "error" | "ready"
+  /** "signed-out": live mode, and neither a session nor a share link (the sign-in screen shows). */
+  status: "loading" | "error" | "ready" | "signed-out"
   error: string | null
   principal: Principal | null
+  /** Signed in (live mode): who, in which org. Null in dev and for share-link guests. */
+  account: SignedIn | null
+  /** Live mode whose sign-in isn't configured: what's missing. */
+  signInProblem: string | null
   /** What the server says about sign-in: "dev" is a local server with none. Undefined until the first read. */
   authMode: "dev" | "live" | undefined
   editable: boolean
@@ -98,7 +104,7 @@ const LIVE_STABLE_MS = 30_000
 function liveUrl(devAs: DevAs) {
   const proto = window.location.protocol === "https:" ? "wss" : "ws"
   const as = import.meta.env.DEV && devAs !== "owner" ? `?as=${devAs}` : ""
-  return `${proto}://${window.location.host}/api/v1/workspace/live${as}`
+  return withTicket(`${proto}://${window.location.host}/api/v1/workspace/live${as}`)
 }
 
 /** Keep the current value when nothing changed, so a read that found nothing new re-renders nothing. */
@@ -115,6 +121,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [principal, setPrincipal] = useState<Principal | null>(null)
   const [authMode, setAuthMode] = useState<"dev" | "live" | undefined>(undefined)
+  const session = useSession()
+  const [signInProblem, setSignInProblem] = useState<string | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [folders, setFolders] = useState<Folder[]>([])
   const [openFolderIds, setOpenFolderIds] = useState<string[]>([])
@@ -193,7 +201,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let cancelled = false
     sync.current = idleSync()
     setStatus("loading")
-    call((c) => c.workspace.snapshot())
+    // Signed in or not decides how requests authenticate; a share-link guest has no session and still gets in.
+    startSession()
+      .then((s) => {
+        if (!cancelled) setSignInProblem(s.status === "signed-out" ? (s.problem ?? null) : null)
+        return Effect.runPromise(api(devAs).pipe(Effect.flatMap((c) => c.workspace.snapshot())))
+      })
       .then((snap) => {
         if (cancelled) return
         setPrincipal(snap.principal)
@@ -205,15 +218,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setOpenFolderIds(readStored(`standard-artifacts:folders-open:${snap.principal.orgId}:${actorKey(snap.principal.actor)}`, [], isIdList))
         setStatus("ready")
       })
-      .catch((e: Error) => {
+      .catch((e: unknown) => {
         if (cancelled) return
-        setError(e.message)
+        if (isUnauthorized(e)) {
+          setStatus("signed-out")
+          return
+        }
+        setError(errorMessage(e))
         setStatus("error")
       })
     return () => {
       cancelled = true
     }
-  }, [call])
+  }, [devAs])
+
+  // A session that ends while the app is open (signed out elsewhere, removed from the org) goes back to the sign-in screen.
+  const sessionEnded = session.status === "signed-out" && principal?.actor.type === "user" && authMode === "live"
+  useEffect(() => {
+    if (sessionEnded) setStatus("signed-out")
+  }, [sessionEnded])
 
   // Stay current with what others (and agents) do: the socket says when, and reads go through the API.
   const ready = status === "ready"
@@ -469,6 +492,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       status,
       error,
       principal,
+      account: session.status === "signed-in" ? session.info : null,
+      signInProblem,
       authMode,
       editable: principal ? canEdit(principal) : false,
       artifacts,
@@ -496,7 +521,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       recordVisit,
       loadContent,
     }),
-    [status, error, principal, authMode, artifacts, folders, create, rename, remove, archive, restore, loadArchived, loadDirectory, createFolder, updateFolder, removeFolder, moveArtifact, fail, openFolders, toggleFolder, expandFolders, devAs, setDevAs, starred, toggleStar, visits, recordVisit, loadContent],
+    [status, error, principal, session, signInProblem, authMode, artifacts, folders, create, rename, remove, archive, restore, loadArchived, loadDirectory, createFolder, updateFolder, removeFolder, moveArtifact, fail, openFolders, toggleFolder, expandFolders, devAs, setDevAs, starred, toggleStar, visits, recordVisit, loadContent],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

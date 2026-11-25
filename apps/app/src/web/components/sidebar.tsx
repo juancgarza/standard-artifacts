@@ -7,6 +7,8 @@ import { shortcutLabel } from "./command-palette"
 import { SidebarToggle } from "./sidebar-collapse"
 import { Folders } from "./sidebar-folders"
 import { Row, SectionHeader, useActiveId } from "./sidebar-parts"
+import { AccountMenu } from "./account-menu"
+import { signIn } from "../session"
 
 /** Rows per kind section before "See all". */
 const TOP = 5
@@ -179,7 +181,7 @@ function Section({ kind, editable, onNavigate }: { kind: ArtifactKind; editable:
 }
 
 function Footer({ onNavigate }: { onNavigate?: () => void }) {
-  const { principal } = useWorkspace()
+  const { principal, account, authMode } = useWorkspace()
   const actor = principal?.actor
   const name = !actor ? "" : actor.type === "user" ? actor.name : actor.type === "guest" ? "Guest" : "Agent"
 
@@ -191,13 +193,22 @@ function Footer({ onNavigate }: { onNavigate?: () => void }) {
             <LockSimpleIcon size={14} /> Read-only
           </div>
           <p className="mt-1 text-muted">Create an account to edit and run agents.</p>
+          {authMode === "live" && (
+            <button type="button" onClick={() => signIn()} className="mt-2 font-medium text-accent hover:underline">
+              Sign in
+            </button>
+          )}
         </div>
       )}
       <div className="flex items-center gap-2 px-1 py-1">
-        <div className="grid size-6 place-items-center rounded-full bg-active text-[11px] font-medium">
-          {name.charAt(0)}
-        </div>
-        <div className="min-w-0 flex-1 truncate text-[13px]">{name}</div>
+        {account ? (
+          <AccountMenu account={account} />
+        ) : (
+          <>
+            <div className="grid size-6 place-items-center rounded-full bg-active text-[11px] font-medium">{name.charAt(0)}</div>
+            <div className="min-w-0 flex-1 truncate text-[13px]">{name}</div>
+          </>
+        )}
         <Link
           to="/settings/{-$section}"
           params={{ section: undefined }}

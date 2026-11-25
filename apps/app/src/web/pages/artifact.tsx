@@ -21,6 +21,7 @@ import { PresenceStack, presenceKey, type LivePresence } from "../components/pre
 import { ShareDialog } from "../components/share-dialog"
 import { MoveDialog } from "../components/move-dialog"
 import { FolderTrail } from "../components/folder-trail"
+import { authHeaders } from "../session"
 
 const nobody: LivePresence = { self: null, others: [], status: null }
 const STATUS_DELAY = 800
@@ -234,7 +235,7 @@ function roomUrl(id: string, devAs: string) {
 const imageUploader = (id: string, devAs: string) => async (file: Blob) => {
   const res = await fetch(`/api/v1/artifacts/${id}/assets`, {
     method: "POST",
-    headers: { "content-type": file.type, ...(import.meta.env.DEV && devAs !== "owner" ? { "x-dev-as": devAs } : {}) },
+    headers: { "content-type": file.type, ...(await authHeaders()), ...(import.meta.env.DEV && devAs !== "owner" ? { "x-dev-as": devAs } : {}) },
     body: file,
   })
   const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string }

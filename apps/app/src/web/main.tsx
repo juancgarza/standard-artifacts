@@ -1,7 +1,9 @@
-import { StrictMode } from "react"
+import { StrictMode, type ReactNode } from "react"
 import { createRoot } from "react-dom/client"
 import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router"
-import { WorkspaceProvider } from "./workspace"
+import { WorkspaceProvider, useWorkspace } from "./workspace"
+import { signIn } from "./session"
+import { SignInPage } from "./pages/sign-in"
 import { Shell } from "./components/shell"
 import { HomePage } from "./pages/home"
 import { ArchivedPage } from "./pages/archived"
@@ -28,10 +30,24 @@ declare module "@tanstack/react-router" {
   }
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <WorkspaceProvider>
-      <RouterProvider router={router} />
-    </WorkspaceProvider>
-  </StrictMode>,
-)
+/** Signed out in live mode: the sign-in screen instead of the app. */
+function Gate({ children }: { children: ReactNode }) {
+  const { status, signInProblem } = useWorkspace()
+  return status === "signed-out" ? <SignInPage problem={signInProblem} /> : children
+}
+
+// An invitation link (WorkOS's, pointed at this app) goes through sign-in, which accepts it and lands on that org.
+const invitation = new URLSearchParams(window.location.search).get("invitation_token")
+if (invitation) {
+  signIn({ invitationToken: invitation, returnTo: "/" })
+} else {
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <WorkspaceProvider>
+        <Gate>
+          <RouterProvider router={router} />
+        </Gate>
+      </WorkspaceProvider>
+    </StrictMode>,
+  )
+}
