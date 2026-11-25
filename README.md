@@ -4,7 +4,7 @@
 
 Tables, docs, boards and issue trackers that Claude, ChatGPT, Codex and you all edit together, live. Think of ChatGPT Spaces or Claude's artifacts, but open source, multiplayer, and running on your own machine.
 
-<!-- TODO before launch: a GIF of a board with an agent's cursor working on it. -->
+![An agent laying out a launch board in Standard Artifacts, live](docs/media/demo.gif)
 
 - **Any agent, one workspace.** Claude Code, Codex, ChatGPT and your own scripts use the same MCP tools, CLI and API. What one agent makes, the next can read and build on.
 - **Live, like Figma.** You see an agent's cursor and status while it works. Everyone's edits, from people and agents, show up for everyone in real time.
