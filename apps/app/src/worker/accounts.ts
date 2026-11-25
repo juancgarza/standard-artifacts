@@ -302,7 +302,7 @@ export class Accounts extends Context.Service<
       const createOrg: Accounts["Service"]["createOrg"] = Effect.fn("Accounts.createOrg")(function* (session, name) {
         const clean = name.replace(/\s+/g, " ").trim()
         if (!clean || clean.length > 80) return yield* new SignInError({ reason: "invalid", message: "Name the workspace (up to 80 characters)." })
-        // TODO(#4): billing and seats. A new workspace starts on the free plan.
+        // TODO(Cloud tracker #4, billing and seats): a new workspace starts on the free plan.
         const orgId = yield* createWorkspace(session.user.id, clean)
         return yield* switchOrg(session, orgId)
       })
@@ -415,7 +415,7 @@ export class Accounts extends Context.Service<
         yield* requireOwner(p)
         const w = yield* api
         const roleSlug = yield* slugFor(p.orgId, input.role)
-        // TODO(#4): seat limits by plan. Invites aren't blocked on the plan yet.
+        // TODO(Cloud tracker #4, billing and seats): enforce seat limits by plan here. Invites aren't blocked on the plan yet.
         const sent = yield* w
           .sendInvitation({ email: input.email.toLowerCase(), organizationId: p.orgId, roleSlug, inviterUserId: workosUserId(p.actor.id) })
           .pipe(Effect.mapError(toApi))
@@ -490,7 +490,7 @@ export class Accounts extends Context.Service<
 
 /**
  * The org's plan, from WorkOS organization metadata `plan` ("free" or "team").
- * TODO(#4): billing sets it. Until then every org is on free, and nothing is
+ * TODO(Cloud tracker #4, billing and seats): billing sets it. Until then every org is on free, and nothing is
  * enforced by plan here.
  */
 const planOf = (metadata: Readonly<Record<string, unknown>> | null | undefined): Session["org"]["plan"] => (metadata?.plan === "team" ? "team" : "free")
