@@ -1,6 +1,7 @@
 import * as Alchemy from "alchemy"
 import * as Command from "alchemy/Command"
 import * as Cloudflare from "@alchemy.run/cloudflare"
+import { RenamePolicy } from "alchemy/Rename"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
@@ -60,12 +61,26 @@ const state = Layer.unwrap(
 )
 
 /** The image for hosted agent runs. Only built when a stage binds it, so dev never needs Docker. */
-const runner = () =>
-  Cloudflare.Container("Runner", {
-    schedulingPolicy: "durable_object",
-    context: `${import.meta.dirname}/../..`,
-    dockerfile: "apps/runner/Dockerfile",
-  })
+const RunnerImage = Cloudflare.Container("Runner", {
+  schedulingPolicy: "durable_object",
+  context: `${import.meta.dirname}/../..`,
+  dockerfile: "apps/runner/Dockerfile",
+})
+
+/**
+ * The same container, declared without the rename claim it would otherwise inherit. StaticSite
+ * wraps its Worker in `renamedFrom("App/Worker")`, and the Durable Object binding yields each
+ * container's `Application` inside that Worker, so the container claimed the same former id and
+ * Alchemy refused the deploy ("both claim former FQN 'App/Worker'"). Running `Application` with
+ * an empty RenamePolicy leaves the container with no former ids. Drop this once Alchemy scopes
+ * StaticSite's rename to the Worker alone.
+ */
+const Runner = new Proxy(RunnerImage, {
+  get: (target, prop, receiver) =>
+    prop === "Application"
+      ? target.Application.pipe(Effect.provideService(RenamePolicy, []))
+      : Reflect.get(target, prop, receiver),
+})
 
 export const App = Cloudflare.Website.StaticSite(
   "App",
@@ -81,7 +96,7 @@ export const App = Cloudflare.Website.StaticSite(
       TRACKER: Cloudflare.DurableObject("TrackerCell"),
       MCP: Cloudflare.DurableObject("McpCell"),
       // Hosted agent runs need Docker to build, so dev stages stay without them and use `stdartifacts agent serve`.
-      ...(!stack.stage.startsWith("dev") && { RUNNER: Cloudflare.DurableObject("RunnerCell", { containers: [runner()] }) }),
+      ...(!stack.stage.startsWith("dev") && { RUNNER: Cloudflare.DurableObject("RunnerCell", { containers: [Runner] }) }),
       ...(process.env.ANTHROPIC_API_KEY && { ANTHROPIC_API_KEY: Redacted.make(process.env.ANTHROPIC_API_KEY) }),
       ...(process.env.TICKET_SECRET && { TICKET_SECRET: Redacted.make(process.env.TICKET_SECRET) }),
       // Sign-in with WorkOS (live mode). Without them, live mode refuses every sign-in and says what's missing.
