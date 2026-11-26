@@ -34,6 +34,7 @@ import {
   workspaceName,
   type Session,
 } from "./session"
+import { Bindings } from "./env"
 import { signTicket } from "./tickets"
 import { makeWorkOS, orgSelection, type Authenticated, type Invitation, type Membership, type WorkOSClient, type WorkOSError, type WorkOSUser } from "./workos"
 
@@ -116,6 +117,7 @@ export class Accounts extends Context.Service<
     Effect.gen(function* () {
       const text = (name: string) => Config.String(name).pipe(Config.withDefault(""))
       const secret = (name: string) => Config.Redacted(name).pipe(Config.withDefault(Redacted.make("")))
+      const env = yield* Bindings
       const mode = (yield* Config.String("AUTH_MODE").pipe(Config.withDefault("live"))) === "dev" ? "dev" : "live"
       const ticketSecret = Redacted.value(yield* secret("TICKET_SECRET"))
       const apiKey = yield* secret("WORKOS_API_KEY")
@@ -148,11 +150,31 @@ export class Accounts extends Context.Service<
         console.error(`WorkOS: ${e.status} ${e.code} ${e.message}`)
         return new SignInError({ reason: "unavailable", message: "The account service didn't answer. Try again in a moment." })
       }
-      /** For calls whose 4xx means the session is over (refresh): sign in again. */
-      const sessionOver = (e: WorkOSError) =>
-        e.status === 0 || e.status >= 500 ? unavailable(e) : new SignInError({ reason: "signed-out", message: "Your session ended. Sign in again." })
+      const signedOut = () => new SignInError({ reason: "signed-out", message: "Your session ended. Sign in again." })
+      /**
+       * Refreshing the session in its own org. Only a refresh token WorkOS
+       * refused (`invalid_grant`, 400, 401) ends the session, and so does a
+       * sign-in step the org now asks for (SSO, MFA), which only a fresh trip
+       * through AuthKit can do. Anything else, rate limits and outages
+       * included, keeps the cookie and says to try again.
+       */
+      const refreshFailed = (e: WorkOSError) =>
+        isTransient(e) ? unavailable(e) : e.code === "invalid_grant" || e.status === 400 || e.status === 401 || STEP_UP.has(e.code) ? signedOut() : unavailable(e)
+      /**
+       * Refreshing into another org (switching). The session is still fine where it
+       * is, so only a dead refresh token signs out. An org that wants SSO or MFA,
+       * or any other refusal, is an answer about that org.
+       */
+      const switchFailed = (e: WorkOSError) => {
+        if (isTransient(e)) return unavailable(e)
+        if (e.code === "invalid_grant" || e.status === 401) return signedOut()
+        if (STEP_UP.has(e.code)) {
+          return new SignInError({ reason: "forbidden", message: "That workspace asks you to sign in with its own method (like SSO or MFA). Sign out, then sign in to it." })
+        }
+        return new SignInError({ reason: "invalid", message: e.message || "Couldn't switch to that workspace." })
+      }
       const signInFailed = (e: WorkOSError) =>
-        e.status === 0 || e.status >= 500 ? unavailable(e) : new SignInError({ reason: "invalid", message: e.message || "Sign-in failed. Try again." })
+        isTransient(e) ? unavailable(e) : new SignInError({ reason: "invalid", message: e.message || "Sign-in failed. Try again." })
 
       // The roles an org can hand out barely change; look them up once in a while, not per invite.
       const roleSlugs = yield* Cache.makeWith(
@@ -214,7 +236,7 @@ export class Accounts extends Context.Service<
         const { wos, key } = yield* client
         const state = randomState()
         const stateCookie = yield* Effect.promise(() =>
-          seal(key, "signin", { state, returnTo: safeReturnTo(options.returnTo), exp: nowS() + STATE_MAX_AGE_S }),
+          seal(key, "signin", { state, returnTo: safeReturnTo(options.returnTo, appOrigin(request)), exp: nowS() + STATE_MAX_AGE_S }),
         )
         const location = wos.authorizeUrl({
           redirectUri: `${appOrigin(request)}/api/auth/callback`,
@@ -257,7 +279,7 @@ export class Accounts extends Context.Service<
       const fresh: Accounts["Service"]["fresh"] = Effect.fn("Accounts.fresh")(function* (session) {
         if (session.accessExp - REFRESH_MARGIN_S > nowS()) return session
         const { wos } = yield* client
-        const auth = yield* wos.refresh(session.refreshToken, session.org.id).pipe(Effect.mapError(sessionOver))
+        const auth = yield* wos.refresh(session.refreshToken, session.org.id).pipe(Effect.mapError(refreshFailed))
         return yield* toSession(auth)
       })
 
@@ -295,13 +317,19 @@ export class Accounts extends Context.Service<
         // Asked first, so "not a member" doesn't read as "your session ended".
         const [membership] = yield* wos.listMemberships({ userId: session.user.id, organizationId: orgId }).pipe(Effect.mapError(signInFailed))
         if (!membership) return yield* new SignInError({ reason: "forbidden", message: "You aren't a member of that workspace." })
-        const auth = yield* wos.refresh(session.refreshToken, orgId).pipe(Effect.mapError(sessionOver))
+        const auth = yield* wos.refresh(session.refreshToken, orgId).pipe(Effect.mapError(switchFailed))
         return yield* toSession(auth)
       })
 
       const createOrg: Accounts["Service"]["createOrg"] = Effect.fn("Accounts.createOrg")(function* (session, name) {
+        const { wos } = yield* client
         const clean = name.replace(/\s+/g, " ").trim()
         if (!clean || clean.length > 80) return yield* new SignInError({ reason: "invalid", message: "Name the workspace (up to 80 characters)." })
+        // TODO(Cloud tracker #7): real quotas. Until then, a flat cap on the workspaces each person owns.
+        const owned = (yield* wos.listMemberships({ userId: session.user.id }).pipe(Effect.mapError(signInFailed))).filter((m) => roleOf(m) === "owner")
+        if (owned.length >= MAX_OWNED_ORGS) {
+          return yield* new SignInError({ reason: "forbidden", message: `You already own ${MAX_OWNED_ORGS} workspaces, the most one person can own for now.` })
+        }
         // TODO(Cloud tracker #4, billing and seats): a new workspace starts on the free plan.
         const orgId = yield* createWorkspace(session.user.id, clean)
         return yield* switchOrg(session, orgId)
@@ -314,7 +342,7 @@ export class Accounts extends Context.Service<
 
       const toApi = (e: WorkOSError): AccountError => {
         if (e.status === 404) return new NotFound({ message: "Not found" })
-        if (e.status === 0 || e.status >= 500) {
+        if (isTransient(e)) {
           console.error(`WorkOS: ${e.status} ${e.code} ${e.message}`)
           return new Unavailable({ message: "The account service didn't answer. Try again in a moment." })
         }
@@ -350,7 +378,10 @@ export class Accounts extends Context.Service<
       })
 
       const currentRole: Accounts["Service"]["currentRole"] = Effect.fn("Accounts.currentRole")(function* (orgId, actorId) {
-        if (!wos) return undefined
+        // Dev has no accounts. Live mode with broken config can't check anyone: that's unavailable, so
+        // access tokens fall back on their grace period and then stop, instead of keeping a role forever.
+        if (mode === "dev") return undefined
+        if (!wos) return yield* new Unavailable({ message: problem ?? "Sign-in isn't configured." })
         const userId = workosUserId(actorId)
         if (!userId) return null
         const [membership] = yield* wos.listMemberships({ userId, organizationId: orgId }).pipe(
@@ -388,6 +419,35 @@ export class Accounts extends Context.Service<
         const w = yield* api
         const all = yield* w.listMemberships({ organizationId: orgId }).pipe(Effect.mapError(toApi))
         return all.filter((m) => roleOf(m) === "owner").length
+      })
+
+      /**
+       * Run a member change holding the org's member lock (in its WorkspaceCell),
+       * so changes go one at a time: the owner check, the last-owner count and the
+       * write can't interleave with another owner's change.
+       */
+      const withMemberLock = <A, E, R>(orgId: string, change: Effect.Effect<A, E, R>) => {
+        const cell = env.WORKSPACE.get(env.WORKSPACE.idFromName(orgId))
+        const holder = crypto.randomUUID()
+        const acquire = Effect.gen(function* () {
+          const deadline = Date.now() + MEMBER_LOCK_WAIT_MS
+          while (!(yield* Effect.promise(() => cell.lockMembers(holder, MEMBER_LOCK_TTL_MS)))) {
+            if (Date.now() > deadline) return yield* new Unavailable({ message: "Someone else is changing members right now. Try again in a moment." })
+            yield* Effect.sleep(Duration.millis(50))
+          }
+        })
+        return Effect.acquireUseRelease(
+          acquire,
+          () => change,
+          () => Effect.promise(() => cell.unlockMembers(holder)).pipe(Effect.ignore),
+        )
+      }
+
+      /** After a change: if the org has no owner left (someone changed WorkOS directly meanwhile), undo it. */
+      const keepAnOwner = Effect.fn("Accounts.keepAnOwner")(function* (orgId: string, undo: Effect.Effect<unknown, AccountError>) {
+        if ((yield* owners(orgId)) > 0) return
+        yield* undo
+        return yield* new Invalid({ message: "That would leave the workspace without an owner. Make someone else an owner first." })
       })
 
       const slugFor = Effect.fn("Accounts.slugFor")(function* (orgId: string, role: Role) {
@@ -444,23 +504,40 @@ export class Accounts extends Context.Service<
               : "They're the only owner. Make someone else an owner first.",
         })
 
-      const updateMember: Accounts["Service"]["updateMember"] = Effect.fn("Accounts.updateMember")(function* (p, id, role) {
-        yield* requireOwner(p)
-        const m = yield* ownMembership(p, id)
-        if (roleOf(m) === "owner" && role !== "owner" && (yield* owners(p.orgId)) <= 1) return yield* lastOwner(m, p)
-        const w = yield* api
-        const updated = yield* w.updateMembership(id, yield* slugFor(p.orgId, role)).pipe(Effect.mapError(toApi))
-        return yield* toMember({ ...updated, user: updated.user ?? m.user ?? null })
-      })
+      const updateMember: Accounts["Service"]["updateMember"] = (p, id, role) =>
+        withMemberLock(
+          p.orgId,
+          Effect.gen(function* () {
+            yield* requireOwner(p)
+            const m = yield* ownMembership(p, id)
+            const demoting = roleOf(m) === "owner" && role !== "owner"
+            if (demoting && (yield* owners(p.orgId)) <= 1) return yield* lastOwner(m, p)
+            const w = yield* api
+            const updated = yield* w.updateMembership(id, yield* slugFor(p.orgId, role)).pipe(Effect.mapError(toApi))
+            if (demoting) {
+              yield* keepAnOwner(p.orgId, w.updateMembership(id, yield* slugFor(p.orgId, "owner")).pipe(Effect.mapError(toApi)))
+            }
+            return yield* toMember({ ...updated, user: updated.user ?? m.user ?? null })
+          }),
+        ).pipe(Effect.withSpan("Accounts.updateMember"))
 
-      const removeMember: Accounts["Service"]["removeMember"] = Effect.fn("Accounts.removeMember")(function* (p, id) {
-        yield* requireOwner(p)
-        const m = yield* ownMembership(p, id)
-        if (roleOf(m) === "owner" && (yield* owners(p.orgId)) <= 1) return yield* lastOwner(m, p)
-        const w = yield* api
-        yield* w.deleteMembership(id).pipe(Effect.mapError(toApi))
-        return userActorId(m.user_id)
-      })
+      const removeMember: Accounts["Service"]["removeMember"] = (p, id) =>
+        withMemberLock(
+          p.orgId,
+          Effect.gen(function* () {
+            yield* requireOwner(p)
+            const m = yield* ownMembership(p, id)
+            const wasOwner = roleOf(m) === "owner"
+            if (wasOwner && (yield* owners(p.orgId)) <= 1) return yield* lastOwner(m, p)
+            const w = yield* api
+            yield* w.deleteMembership(id).pipe(Effect.mapError(toApi))
+            if (wasOwner) {
+              const slug = yield* slugFor(p.orgId, "owner")
+              yield* keepAnOwner(p.orgId, w.createMembership({ userId: m.user_id, organizationId: p.orgId, roleSlug: slug }).pipe(Effect.mapError(toApi)))
+            }
+            return userActorId(m.user_id)
+          }),
+        ).pipe(Effect.withSpan("Accounts.removeMember"))
 
       return Accounts.of({
         mode,
@@ -495,3 +572,26 @@ export class Accounts extends Context.Service<
  */
 const planOf = (metadata: Readonly<Record<string, unknown>> | null | undefined): Session["org"]["plan"] => (metadata?.plan === "team" ? "team" : "free")
 
+/** The most workspaces one person can own through "New workspace" (a stopgap until real quotas, Cloud tracker #7). */
+export const MAX_OWNED_ORGS = 10
+
+/** WorkOS couldn't answer just now (down, rate limited): try again, nothing is decided. */
+const isTransient = (e: WorkOSError) => e.status === 0 || e.status === 429 || e.status >= 500
+
+/**
+ * WorkOS authentication errors that ask for another sign-in step in AuthKit
+ * (https://workos.com/docs/reference/authkit/authentication-errors).
+ */
+const STEP_UP: ReadonlySet<string> = new Set([
+  "sso_required",
+  "mfa_enrollment",
+  "mfa_challenge",
+  "organization_authentication_methods_required",
+  "email_verification_required",
+  "radar_email_challenge",
+  "radar_sms_challenge",
+])
+
+/** How long a member change may hold the org's member lock, and how long to wait for it. */
+const MEMBER_LOCK_TTL_MS = 30_000
+const MEMBER_LOCK_WAIT_MS = 10_000

@@ -656,6 +656,35 @@ export class WorkspaceCell extends DurableObject<Env> {
     return { ok: true, value: null }
   }
 
+  // --- Member changes, one at a time ----------------------------------------------------------
+
+  /**
+   * A lock the Worker holds while it changes this org's members (roles,
+   * removals), so the last-owner check and the write can't interleave with
+   * another owner's: two owners demoting each other at once would otherwise
+   * both see two owners and leave none. It's a row, not memory, so it survives
+   * the cell being evicted mid-change, and it expires on its own if the Worker
+   * holding it dies. Synchronous, so taking it is atomic.
+   */
+  private memberLockTable() {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS member_lock (id INTEGER PRIMARY KEY CHECK (id = 1), holder TEXT NOT NULL, until INTEGER NOT NULL)")
+  }
+
+  /** Take the member lock for `ttlMs`. False while someone else holds it. */
+  lockMembers(holder: string, ttlMs: number): boolean {
+    this.memberLockTable()
+    const now = Date.now()
+    const held = this.sql.exec<{ holder: string; until: number }>("SELECT holder, until FROM member_lock WHERE id = 1").toArray()[0]
+    if (held && held.until > now && held.holder !== holder) return false
+    this.sql.exec("INSERT OR REPLACE INTO member_lock (id, holder, until) VALUES (1, ?, ?)", holder, now + ttlMs)
+    return true
+  }
+
+  unlockMembers(holder: string): void {
+    this.memberLockTable()
+    this.sql.exec("DELETE FROM member_lock WHERE id = 1 AND holder = ?", holder)
+  }
+
   // --- Personal access tokens ---------------------------------------------------------------
 
   /**

@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import type { SessionInfo, SessionOrgChoice } from "@standard-artifacts/protocol"
 import { Accounts, SignInError } from "./accounts"
 import { readCookie } from "./auth"
-import { ORG_COOKIE, SESSION_COOKIE, SESSION_MAX_AGE_S, STATE_COOKIE, STATE_MAX_AGE_S, TICKET_COOKIE, TICKET_TTL_S, safeReturnTo, setCookie, type Session } from "./session"
+import { ORG_COOKIE, SESSION_COOKIE, SESSION_MAX_AGE_S, STATE_COOKIE, STATE_MAX_AGE_S, TICKET_COOKIE, TICKET_TTL_S, cookieName, safeReturnTo, setCookie, type Session } from "./session"
 
 /**
  * Browser sign-in, outside the HttpApi because these are redirects and cookies:
@@ -49,6 +49,9 @@ export const authRoute = (request: Request) =>
     const url = new URL(request.url)
     const route = `${request.method} ${url.pathname}`
     const cookies = request.headers.get("cookie") ?? undefined
+    // The credential cookies are `__Host-` prefixed wherever they're Secure (see cookieName).
+    const SESSION = cookieName(request.url, SESSION_COOKIE)
+    const TICKET = cookieName(request.url, TICKET_COOKIE)
 
     if (accounts.mode === "dev") {
       // No sign-in here: everyone is the local owner. Never pretend otherwise.
@@ -69,14 +72,14 @@ export const authRoute = (request: Request) =>
 
     const clear = (name: string) => setCookie(request.url, name, "", 0)
     const sessionCookies = (session: Session, sealed: string) => [
-      setCookie(request.url, SESSION_COOKIE, sealed, SESSION_MAX_AGE_S),
+      setCookie(request.url, SESSION, sealed, SESSION_MAX_AGE_S),
       // Not a secret, and it outlives the session: the next sign-in lands in the same org.
       setCookie(request.url, ORG_COOKIE, session.org.id, 60 * 60 * 24 * 365),
     ]
 
     /** The browser's session, refreshed if its access token is about to expire. */
     const current = Effect.gen(function* () {
-      const stored = yield* accounts.readSession(readCookie(cookies, SESSION_COOKIE))
+      const stored = yield* accounts.readSession(readCookie(cookies, SESSION))
       if (!stored) return yield* new SignInError({ reason: "signed-out", message: "Sign in to continue." })
       const session = yield* accounts.fresh(stored)
       return { session, changed: session !== stored }
@@ -87,7 +90,7 @@ export const authRoute = (request: Request) =>
       Effect.gen(function* () {
         const minted = yield* accounts.mint(session)
         const set = changed ? sessionCookies(session, yield* accounts.sealSession(session)) : []
-        set.push(setCookie(request.url, TICKET_COOKIE, minted.ticket, TICKET_TTL_S))
+        set.push(setCookie(request.url, TICKET, minted.ticket, TICKET_TTL_S))
         const body: SessionInfo = {
           mode: "live",
           signedIn: true,
@@ -104,7 +107,7 @@ export const authRoute = (request: Request) =>
     const failed = (e: SignInError) => {
       if (e.reason === "misconfigured") return json({ mode: "live", signedIn: false, problem: e.message } satisfies SessionInfo, 503)
       if (e.reason === "signed-out") {
-        return json({ mode: "live", signedIn: false } satisfies SessionInfo, 401, [clear(SESSION_COOKIE), clear(TICKET_COOKIE)])
+        return json({ mode: "live", signedIn: false } satisfies SessionInfo, 401, [clear(SESSION), clear(TICKET)])
       }
       return json({ _tag: e.reason === "forbidden" ? "Forbidden" : e.reason === "invalid" ? "Invalid" : "Unavailable", message: e.message }, status[e.reason])
     }
@@ -135,7 +138,7 @@ export const authRoute = (request: Request) =>
           .finishSignIn(request, { code, state, stateCookie: readCookie(cookies, STATE_COOKIE), lastOrg: readCookie(cookies, ORG_COOKIE) })
           .pipe(
             Effect.flatMap(({ session, returnTo }) =>
-              Effect.map(accounts.sealSession(session), (sealed) => redirect(safeReturnTo(returnTo), [...sessionCookies(session, sealed), clear(STATE_COOKIE), clear(TICKET_COOKIE)])),
+              Effect.map(accounts.sealSession(session), (sealed) => redirect(safeReturnTo(returnTo, accounts.appOrigin(request)), [...sessionCookies(session, sealed), clear(STATE_COOKIE), clear(TICKET)])),
             ),
             Effect.catchTag("SignInError", (e) => Effect.succeed(errorPage(e.message, status[e.reason]))),
           )
@@ -149,7 +152,7 @@ export const authRoute = (request: Request) =>
 
       case "GET /api/auth/orgs": {
         // Only needs who's asking, so it never refreshes: that would race the page's ticket renewals over the refresh token.
-        const session = yield* accounts.readSession(readCookie(cookies, SESSION_COOKIE))
+        const session = yield* accounts.readSession(readCookie(cookies, SESSION))
         if (!session) return failed(new SignInError({ reason: "signed-out", message: "Sign in to continue." }))
         return yield* accounts.orgs(session).pipe(
           Effect.map((orgs: ReadonlyArray<SessionOrgChoice>) => json(orgs)),
@@ -169,8 +172,8 @@ export const authRoute = (request: Request) =>
       }
 
       case "POST /api/auth/logout": {
-        const session = yield* accounts.readSession(readCookie(cookies, SESSION_COOKIE))
-        return json({ redirect: accounts.signOutUrl(request, session) }, 200, [clear(SESSION_COOKIE), clear(TICKET_COOKIE), clear(STATE_COOKIE)])
+        const session = yield* accounts.readSession(readCookie(cookies, SESSION))
+        return json({ redirect: accounts.signOutUrl(request, session) }, 200, [clear(SESSION), clear(TICKET), clear(STATE_COOKIE)])
       }
 
       default:

@@ -89,9 +89,14 @@ type RawError = { readonly _tag: "Unauthorized" | "Forbidden" | "NotFound" | "In
 const status = { Unauthorized: 401, Forbidden: 403, NotFound: 404, Invalid: 400 } as const
 
 /** Raw routes (sockets, bytes): authenticate, run, and turn typed errors into JSON responses. */
-const raw = <R>(name: string, request: Request, run: (principal: Principal) => Effect.Effect<Response, RawError, R>) =>
+const raw = <R>(
+  name: string,
+  request: Request,
+  run: (principal: Principal) => Effect.Effect<Response, RawError, R>,
+  options: { readonly ticketCookie?: boolean } = {},
+) =>
   Effect.gen(function* () {
-    const principal = yield* (yield* Auth).resolve(credentialsFromRequest(request))
+    const principal = yield* (yield* Auth).resolve(credentialsFromRequest(request, options))
     return yield* run(principal)
   }).pipe(
     Effect.catch((error: RawError) => Effect.succeed(Response.json({ _tag: error._tag, message: error.message }, { status: status[error._tag] }))),
@@ -132,6 +137,8 @@ const downloadAsset = (request: Request, id: string, assetId: string) =>
       if (!asset.mime.startsWith("image/")) headers.set("content-disposition", "attachment")
       return new Response(asset.bytes, { headers })
     }),
+    // `<img>` URLs can't carry a header: this is the one route the ticket cookie opens.
+    { ticketCookie: true },
   )
 
 const cookie = (request: Request, name: string, value: string, maxAge: number) => {

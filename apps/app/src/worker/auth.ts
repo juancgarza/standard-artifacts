@@ -3,7 +3,7 @@ import { Ticket, Unauthorized, type ArtifactKind, type Principal } from "@standa
 import { Accounts } from "./accounts"
 import type { ResolvedToken } from "./cells/workspace-cell"
 import { Bindings } from "./env"
-import { TICKET_COOKIE, agentRole, apiTokenOrg, hashApiToken } from "./session"
+import { TICKET_COOKIE, agentRole, apiTokenOrg, cookieName, hashApiToken } from "./session"
 
 /**
  * What a transport could find on a request. HTTP reads headers and cookies;
@@ -183,9 +183,10 @@ export class Auth extends Context.Service<
 }
 
 /**
- * Principals that came from an access token. A token can't mint more tokens, so a
- * leaked one can't outlive its revocation. (Kept beside the principal rather than
- * in it: the principal is the signed contract cells see.)
+ * Principals that came from an access token. A token can't mint more tokens (so a
+ * leaked one can't outlive its revocation), manage members or make share links:
+ * see `notViaToken` in http.ts. (Kept beside the principal rather than in it: the
+ * principal is the signed contract cells see.)
  */
 export const fromAccessToken = new WeakSet<Principal>()
 
@@ -213,13 +214,19 @@ function devPrincipalAs(as: string | undefined, ownerName: string): Principal {
   }
 }
 
-/** Pull credentials off a raw Request (used for WebSocket upgrades). */
-export function credentialsFromRequest(request: Request): Credentials {
+/**
+ * Pull credentials off a raw Request (sockets, asset bytes, MCP). The ticket
+ * cookie counts only where `ticketCookie` says so: asset GETs, for `<img>` URLs
+ * that can't carry a header. Everywhere else a ticket must be sent on purpose
+ * (bearer or `?ticket=`), so a cookie the browser attaches on its own never
+ * opens a socket or another API route.
+ */
+export function credentialsFromRequest(request: Request, options: { readonly ticketCookie?: boolean } = {}): Credentials {
   const url = new URL(request.url)
   return {
     bearer: bearer(request.headers.get("authorization") ?? undefined),
     ticket: url.searchParams.get("ticket") ?? undefined,
-    cookie: readCookie(request.headers.get("cookie") ?? undefined, TICKET_COOKIE),
+    cookie: options.ticketCookie ? readCookie(request.headers.get("cookie") ?? undefined, cookieName(request.url, TICKET_COOKIE)) : undefined,
     devAs: request.headers.get("x-dev-as") ?? url.searchParams.get("as") ?? undefined,
     client: request.headers.get("x-standard-artifacts-client") ?? undefined,
     share: readCookie(request.headers.get("cookie") ?? undefined, SHARE_COOKIE),

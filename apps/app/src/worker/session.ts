@@ -232,22 +232,55 @@ export function isSignInState(v: unknown): v is SignInState {
 
 // --- Redirects and cookies --------------------------------------------------------------------
 
-/** Only a path on this app (`/boards/b_1`), never another site (`//evil.test`, `https://…`, `/\evil`). */
-export function safeReturnTo(path: string | null | undefined): string {
-  if (!path || !path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\") || /[\r\n]/.test(path)) return "/"
-  if (path.startsWith("/api/")) return "/"
-  return path.slice(0, 1000)
+/**
+ * Only a path on this app (`/boards/b_1`), never another site (`//evil.test`,
+ * `https://…`, `/\evil`, `/%09/evil`). The path is resolved against the app's
+ * origin and must stay on it; what comes back is just its path, query and hash.
+ * Control characters and backslashes are refused outright: browsers strip or
+ * reinterpret them, which is how `/\t/evil.test` becomes `//evil.test`.
+ */
+export function safeReturnTo(path: string | null | undefined, appOrigin = "https://app.invalid"): string {
+  if (!path || !path.startsWith("/") || path.length > 1000 || /[\u0000-\u001f\u007f\\]/.test(path)) return "/"
+  let url: URL
+  let origin: string
+  try {
+    origin = new URL(appOrigin).origin
+    url = new URL(path, origin)
+  } catch {
+    return "/"
+  }
+  if (url.origin !== origin) return "/"
+  const local = `${url.pathname}${url.search}${url.hash}`
+  // `/.//evil` resolves to the path `//evil`, which a browser reads as another host.
+  if (!local.startsWith("/") || local.startsWith("//") || local.startsWith("/api/")) return "/"
+  return local
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"])
 
+/** Cookies are Secure everywhere except over plain http to this machine (local testing), where browsers would drop them. */
+const isSecure = (requestUrl: string) => {
+  try {
+    const url = new URL(requestUrl)
+    return url.protocol === "https:" || !LOOPBACK.has(url.hostname)
+  } catch {
+    // Not an absolute URL: assume production, where cookies are Secure.
+    return true
+  }
+}
+
 /**
- * A Set-Cookie value: HttpOnly, SameSite=Lax, Path=/, and Secure, except over
- * plain http to this machine (local testing), where browsers would drop it.
+ * The name to use for a credential cookie (the session, the ticket). Where
+ * cookies are Secure it carries the `__Host-` prefix, so the browser only
+ * accepts it from this exact host, over https, for Path=/ and with no Domain:
+ * a sibling subdomain can't plant or shadow it. Plain-http localhost keeps the
+ * bare name, since browsers refuse `__Host-` cookies without Secure.
  */
+export const cookieName = (requestUrl: string, name: string) => (isSecure(requestUrl) ? `__Host-${name}` : name)
+
+/** A Set-Cookie value: HttpOnly, SameSite=Lax, Path=/, and Secure, except over plain http to this machine. */
 export function setCookie(requestUrl: string, name: string, value: string, maxAge: number): string {
-  const url = new URL(requestUrl)
-  const secure = url.protocol === "https:" || !LOOPBACK.has(url.hostname) ? "; Secure" : ""
+  const secure = isSecure(requestUrl) ? "; Secure" : ""
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
 }
 

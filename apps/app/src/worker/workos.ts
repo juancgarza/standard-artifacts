@@ -159,6 +159,20 @@ export function makeWorkOS(options: WorkOSOptions) {
 
   const secret = () => ({ client_id: options.clientId, client_secret: Redacted.value(options.apiKey) })
 
+  /** Every item of a list endpoint, following `list_metadata.after` (up to 10 pages of 100). */
+  const listAll = <S extends Schema.Top & { readonly DecodingServices: never }>(path: string, item: S, query: Query) =>
+    Effect.gen(function* () {
+      const all: Array<S["Type"]> = []
+      let after: string | undefined
+      for (let page = 0; page < 10; page++) {
+        const res = yield* call("GET", path, List(item), { query: { ...query, limit: 100, after } })
+        all.push(...res.data)
+        after = res.list_metadata?.after ?? undefined
+        if (!after || res.data.length === 0) break
+      }
+      return all
+    })
+
   return {
     /** The AuthKit hosted sign-in page, which comes back to `redirectUri` with `?code&state`. */
     authorizeUrl: (p: { readonly redirectUri: string; readonly state: string; readonly screenHint?: "sign-in" | "sign-up"; readonly invitationToken?: string; readonly loginHint?: string }) => {
@@ -169,6 +183,8 @@ export function makeWorkOS(options: WorkOSOptions) {
       url.searchParams.set("provider", "authkit")
       url.searchParams.set("state", p.state)
       if (p.screenHint) url.searchParams.set("screen_hint", p.screenHint)
+      // `invitation_token` redeems a pending invitation during sign-in (AuthKit's authorize parameters,
+      // https://workos.com/docs/reference/authkit/authentication/get-authorization-url, checked 2026-11).
       if (p.invitationToken) url.searchParams.set("invitation_token", p.invitationToken)
       if (p.loginHint) url.searchParams.set("login_hint", p.loginHint)
       return url.toString()
@@ -200,19 +216,12 @@ export function makeWorkOS(options: WorkOSOptions) {
     listRoles: (organizationId: string) =>
       Effect.map(call("GET", `/organizations/${encodeURIComponent(organizationId)}/roles`, Roles), (r) => r.data.map((x) => x.slug)),
     /** Every active membership matching the filter, following pages (up to 1,000). */
-    listMemberships: (filter: { readonly userId?: string; readonly organizationId?: string }) =>
-      Effect.gen(function* () {
-        const all: Array<Membership> = []
-        let after: string | undefined
-        for (let page = 0; page < 10; page++) {
-          const res = yield* call("GET", "/user_management/organization_memberships", List(Membership), {
-            query: { user_id: filter.userId, organization_id: filter.organizationId, statuses: ["active"], limit: 100, after, order: "asc" },
-          })
-          all.push(...res.data)
-          after = res.list_metadata?.after ?? undefined
-          if (!after || res.data.length === 0) break
-        }
-        return all
+    listMemberships: (filter: { readonly userId?: string; readonly organizationId?: string }): Effect.Effect<ReadonlyArray<Membership>, WorkOSError> =>
+      listAll("/user_management/organization_memberships", Membership, {
+        user_id: filter.userId,
+        organization_id: filter.organizationId,
+        statuses: ["active"],
+        order: "asc",
       }),
     getMembership: (id: string) => call("GET", `/user_management/organization_memberships/${encodeURIComponent(id)}`, Membership),
     createMembership: (p: { readonly userId: string; readonly organizationId: string; readonly roleSlug: string | undefined }) =>
@@ -222,11 +231,9 @@ export function makeWorkOS(options: WorkOSOptions) {
     updateMembership: (id: string, roleSlug: string) =>
       call("PUT", `/user_management/organization_memberships/${encodeURIComponent(id)}`, Membership, { body: { role_slug: roleSlug } }),
     deleteMembership: (id: string) => Effect.asVoid(call("DELETE", `/user_management/organization_memberships/${encodeURIComponent(id)}`, Empty)),
-    listInvitations: (organizationId: string) =>
-      Effect.map(
-        call("GET", "/user_management/invitations", List(Invitation), { query: { organization_id: organizationId, limit: 100, order: "desc" } }),
-        (r) => r.data,
-      ),
+    /** An org's invitations, newest first, following pages (up to 1,000). */
+    listInvitations: (organizationId: string): Effect.Effect<ReadonlyArray<Invitation>, WorkOSError> =>
+      listAll("/user_management/invitations", Invitation, { organization_id: organizationId, order: "desc" }),
     getInvitation: (id: string) => call("GET", `/user_management/invitations/${encodeURIComponent(id)}`, Invitation),
     sendInvitation: (p: { readonly email: string; readonly organizationId: string; readonly roleSlug: string | undefined; readonly inviterUserId: string | undefined }) =>
       call("POST", "/user_management/invitations", Invitation, {

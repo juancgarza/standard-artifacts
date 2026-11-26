@@ -22,12 +22,14 @@ People and agents edit the same artifacts, and boards run HTML that someone else
   - Agents act on behalf of a person and never have more access than that person.
 - **Tickets.** In live mode, the Worker signs HMAC tickets with `TICKET_SECRET`, and every API, WebSocket and MCP request must carry a valid one (or an access token or share link, below). Tickets last 5 minutes and can't be revoked.
 - **Sign-in** (live mode) goes through WorkOS AuthKit. WorkOS is the source of truth for orgs, members and roles.
-  - The session is an httpOnly, SameSite=Lax, Secure cookie, sealed with AES-GCM under `WORKOS_COOKIE_PASSWORD`. It holds a WorkOS refresh token and never reaches a cell.
-  - The sign-in round trip is bound to the browser by a sealed state cookie, and `return_to` only accepts paths on the app.
+  - The session is an httpOnly, SameSite=Lax, Secure, `__Host-` cookie, sealed with AES-GCM under `WORKOS_COOKIE_PASSWORD`. It holds a WorkOS refresh token and never reaches a cell.
+  - The ticket is also set as a short `__Host-` cookie, but it only opens asset downloads (`<img>` URLs). API calls, sockets and MCP need the ticket sent on purpose.
+  - The sign-in round trip is bound to the browser by a sealed state cookie. `return_to` is resolved against the app's origin and must stay on it; control characters and backslashes are refused.
+  - Only a refresh token WorkOS refuses ends a session. Rate limits and outages keep it, and an org that asks for SSO or MFA refuses the switch without signing anyone out.
   - `/api/auth/*` POSTs are refused when their Origin is another site.
   - Live mode with missing sign-in config refuses sign-in and says why. It never falls back to dev mode.
-- **Members.** Only owners invite, change roles and remove people, and the Worker checks with WorkOS that the caller is still an owner before each change. A membership or invitation from another org reads as not found. The last owner can't be removed or demoted.
-- **Access tokens** (`sat_…`) act as one person in one org. Only a SHA-256 hash is stored. The person's role is checked with WorkOS every 5 minutes, and the tokens of someone who left the org stop working. Agents, guests and other tokens can't create tokens.
+- **Members.** Only owners invite, change roles and remove people, in the app: never with an access token. The Worker checks with WorkOS that the caller is still an owner before each change. A membership or invitation from another org reads as not found. The last owner can't be removed or demoted: role changes and removals in an org go one at a time (a lock in its WorkspaceCell), and a change that still leaves no owner is undone.
+- **Access tokens** (`sat_…`) act as one person in one org. Only a SHA-256 hash is stored. The person's role is checked with WorkOS every 5 minutes, and the tokens of someone who left the org stop working. Making one needs the browser's session cookie, so a ticket alone (say, from a socket URL in a log) can't. Agents, guests and other tokens can't create tokens, invite or change members, or make share links. If WorkOS can't be reached, or live mode's config is broken, a token keeps its last-known role for an hour, then stops.
 - **Isolation between orgs.** Cells are named `<org>:<artifact>`, and the org comes only from a signed ticket, a token's stored hash, or a share link's cell, so a principal can't address another org's artifact.
 - **Share links** give a read-only guest access to one artifact. An owner can turn a link off.
 

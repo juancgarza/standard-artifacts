@@ -1,13 +1,24 @@
 import { Config, Effect, Layer } from "effect"
 import { HttpServerRequest } from "effect/http"
 import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api"
-import { Api, Authentication, CurrentPrincipal, Forbidden, Invalid, ValidationErrors, formatIssue } from "@standard-artifacts/protocol"
+import { Api, Authentication, CurrentPrincipal, Forbidden, Invalid, ValidationErrors, formatIssue, type Principal } from "@standard-artifacts/protocol"
 import { Accounts } from "./accounts"
 import { Auth, GUEST_COOKIE, SHARE_COOKIE, bearer, fromAccessToken } from "./auth"
-import { TICKET_COOKIE } from "./session"
+import { SESSION_COOKIE, cookieName, userActorId } from "./session"
 import { Rooms, Search, Workspaces } from "./services"
 
 /** Handlers stay thin: read the principal, call a service, return its result. */
+
+/**
+ * The principal, unless it came from an access token. Some things only a person
+ * at the app may do: managing members, sharing a link outside the org, making
+ * tokens. Otherwise a leaked token could invite its finder as an owner, remove
+ * the real owners, or outlive its own revocation.
+ */
+const notViaToken = (message: string) =>
+  Effect.flatMap(CurrentPrincipal, (p) => (fromAccessToken.has(p) ? Effect.fail(new Forbidden({ message })) : Effect.succeed(p)))
+
+const MANAGE_BY_TOKEN = "Manage members in the app, not with an access token."
 
 export const AuthenticationLive = Layer.effect(
   Authentication,
@@ -17,8 +28,8 @@ export const AuthenticationLive = Layer.effect(
       Effect.fn("Http.authenticate")(function* (httpEffect) {
         const request = yield* HttpServerRequest.HttpServerRequest
         const principal = yield* auth.resolve({
+          // No ticket cookie here: API calls send their ticket as a bearer token (see credentialsFromRequest).
           bearer: bearer(request.headers["authorization"]),
-          cookie: request.cookies[TICKET_COOKIE],
           devAs: request.headers["x-dev-as"],
           client: request.headers["x-standard-artifacts-client"],
           share: request.cookies[SHARE_COOKIE],
@@ -124,7 +135,8 @@ export const SharingHandlers = HttpApiBuilder.group(
     const workspaces = yield* Workspaces
     return handlers.handleAll({
       access: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.access(p, params.id)),
-      createLink: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.createLink(p, params.id)),
+      createLink: ({ params }) =>
+        Effect.flatMap(notViaToken("Share links are made in the app, not with an access token."), (p) => workspaces.createLink(p, params.id)),
       deleteLink: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.deleteLink(p, params.id)),
     })
   }),
@@ -138,14 +150,15 @@ export const OrgHandlers = HttpApiBuilder.group(
     const workspaces = yield* Workspaces
     return handlers.handleAll({
       members: () => Effect.flatMap(CurrentPrincipal, (p) => accounts.members(p)),
-      invite: ({ payload }) => Effect.flatMap(CurrentPrincipal, (p) => accounts.invite(p, payload)),
-      resendInvitation: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => accounts.resendInvitation(p, params.id)),
-      revokeInvitation: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => accounts.revokeInvitation(p, params.id)),
-      updateMember: ({ params, payload }) => Effect.flatMap(CurrentPrincipal, (p) => accounts.updateMember(p, params.id, payload.role)),
+      // Listing is fine with a token; every change needs a person at the app.
+      invite: ({ payload }) => Effect.flatMap(notViaToken(MANAGE_BY_TOKEN), (p) => accounts.invite(p, payload)),
+      resendInvitation: ({ params }) => Effect.flatMap(notViaToken(MANAGE_BY_TOKEN), (p) => accounts.resendInvitation(p, params.id)),
+      revokeInvitation: ({ params }) => Effect.flatMap(notViaToken(MANAGE_BY_TOKEN), (p) => accounts.revokeInvitation(p, params.id)),
+      updateMember: ({ params, payload }) => Effect.flatMap(notViaToken(MANAGE_BY_TOKEN), (p) => accounts.updateMember(p, params.id, payload.role)),
       // Whoever leaves takes their access tokens with them.
       removeMember: ({ params }) =>
         Effect.gen(function* () {
-          const p = yield* CurrentPrincipal
+          const p = yield* notViaToken(MANAGE_BY_TOKEN)
           const userId = yield* accounts.removeMember(p, params.id)
           yield* workspaces.revokeUserTokens(p, userId)
         }),
@@ -158,14 +171,32 @@ export const TokensHandlers = HttpApiBuilder.group(
   "tokens",
   Effect.fn("Http.tokens")(function* (handlers) {
     const workspaces = yield* Workspaces
+    const accounts = yield* Accounts
+
+    /**
+     * With sign-in, a token is made only by a person in the app: the request must
+     * carry the browser's session cookie, for the same person and org as the
+     * ticket. A ticket alone isn't enough, since tickets also travel as
+     * `?ticket=` on sockets and can end up in logs. Dev mode has no sessions.
+     */
+    const fromSession = (p: Principal) =>
+      Effect.gen(function* () {
+        if (accounts.mode === "dev") return
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const session = yield* accounts.readSession(request.cookies[cookieName(request.originalUrl, SESSION_COOKIE)])
+        if (!session || userActorId(session.user.id) !== p.actor.id || session.org.id !== p.orgId) {
+          return yield* new Forbidden({ message: "Create access tokens in Settings, signed in to the app." })
+        }
+      })
+
     return handlers.handleAll({
       list: () => Effect.flatMap(CurrentPrincipal, (p) => workspaces.listTokens(p)),
       create: ({ payload }) =>
-        Effect.flatMap(CurrentPrincipal, (p) =>
-          fromAccessToken.has(p)
-            ? Effect.fail(new Forbidden({ message: "Create access tokens in Settings, not with another token." }))
-            : workspaces.createToken(p, payload.name),
-        ),
+        Effect.gen(function* () {
+          const p = yield* notViaToken("Create access tokens in Settings, not with another token.")
+          yield* fromSession(p)
+          return yield* workspaces.createToken(p, payload.name)
+        }),
       revoke: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.revokeToken(p, params.id)),
     })
   }),
