@@ -31,15 +31,23 @@ const HOSTNAMES: Partial<Record<string, string>> = {
   prod: `app.${ZONE}`,
 }
 
-/** A hosted stage's custom domain, with workers.dev off so the app has one origin (no preview URLs either). */
-const hostedDomain = (stage: string) => {
+/**
+ * A hosted stage's Worker name and custom domain, with workers.dev off so the app has one origin
+ * (no preview URLs either). The name is fixed rather than derived from the stack id: Durable
+ * Object data belongs to the Worker, so renaming it later would mean a new, empty app. Dev
+ * stages keep the derived name, which their local data is keyed by.
+ */
+const hosted = (stage: string) => {
   const name = HOSTNAMES[stage]
-  return name ? { domain: { name, zoneName: ZONE }, workersDev: false } : {}
+  return name
+    ? { name: `standard-artifacts-${stage}`, domain: { name, zoneName: ZONE }, workersDev: false }
+    : {}
 }
 
 /**
- * Deploy state: resource ids, and the random suffix in every physical name (the Worker, and so
- * its Durable Object namespaces). Losing it means the next deploy creates a new, empty Worker.
+ * Deploy state: resource ids, and the random suffix in every derived physical name. Hosted
+ * Workers have fixed names (see `hosted`), but losing their state still means the next deploy
+ * no longer knows it owns them, so recover it rather than deploying blind.
  * Dev stages keep it in apps/app/.alchemy, next to their local data; everything else uses the
  * Cloudflare State Store (a Worker named alchemy-state-store in the deploying account), so CI and
  * laptops share it.
@@ -91,7 +99,7 @@ export const App = Cloudflare.Website.StaticSite(
       ...(process.env.TURBOPUFFER_URL && { TURBOPUFFER_URL: process.env.TURBOPUFFER_URL }),
     },
     assets: { notFoundHandling: "single-page-application", runWorkerFirst: ["/api/*", "/mcp"] },
-    ...hostedDomain(stack.stage),
+    ...hosted(stack.stage),
     dev: { port: 1337, strictPort: true },
   })),
 )
