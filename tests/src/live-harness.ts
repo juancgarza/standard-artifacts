@@ -31,8 +31,11 @@ export interface LiveApp {
   close(): Promise<void>
 }
 
-/** Start the Worker in live mode. `bindings` override or remove (undefined) the defaults, e.g. to leave sign-in unconfigured. */
-export async function startLive(bindings: Record<string, string | undefined> = {}): Promise<LiveApp> {
+/**
+ * Start the Worker in live mode. `bindings` override or remove (undefined) the defaults, e.g. to leave sign-in unconfigured.
+ * `persist` keeps the Durable Objects in that directory instead of memory, so a second app can pick up where one left off.
+ */
+export async function startLive(bindings: Record<string, string | undefined> = {}, options: { readonly persist?: string } = {}): Promise<LiveApp> {
   if (!existsSync(`${dist}worker.mjs`)) throw new Error("packages/server isn't built: run pnpm --filter @standard-artifacts/server build")
   const fake = await startFakeWorkOS()
   const port = await freePort()
@@ -58,6 +61,7 @@ export async function startLive(bindings: Record<string, string | undefined> = {
     compatibilityFlags: ["nodejs_compat"],
     bindings: Object.fromEntries(Object.entries(all).filter((e): e is [string, string] => e[1] !== undefined)),
     durableObjects: Object.fromEntries(Object.entries(cells).map(([binding, className]) => [binding, { className, useSQLite: true }])),
+    ...(options.persist && { durableObjectsPersist: options.persist }),
     assets: {
       directory: `${dist}assets`,
       routerConfig: { has_user_worker: true, invoke_user_worker_ahead_of_assets: false, static_routing: { user_worker: ["/api/*", "/mcp"] } },
@@ -137,6 +141,17 @@ export class Visitor {
       method,
       headers: { "content-type": "application/json", ...(this.ticket && { authorization: `Bearer ${this.ticket}` }), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    const text = await res.text()
+    return { status: res.status, body: text ? JSON.parse(text) : null }
+  }
+
+  /** Make an access token the way Settings does: the ticket as a bearer token, plus the browser's cookies (the session). */
+  async createToken(name: string): Promise<{ status: number; body: any }> {
+    const res = await fetch(`${this.app.base}/api/v1/tokens`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.ticket}`, cookie: this.cookieHeader() },
+      body: JSON.stringify({ name }),
     })
     const text = await res.text()
     return { status: res.status, body: text ? JSON.parse(text) : null }

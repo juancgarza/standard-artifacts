@@ -9,7 +9,13 @@ import { randomBytes } from "node:crypto"
  * It behaves like WorkOS where our code depends on it: refresh tokens rotate
  * (an old one stops working), a user in several orgs gets
  * `organization_selection_required`, access tokens carry `sid`, `org_id` and
- * `role`, and an invitation is accepted by signing in with its token.
+ * `role`, and an invitation is accepted by signing in with its token. Lists
+ * come in pages (`limit`, `after`), like WorkOS's.
+ *
+ * Tests can also make it misbehave: fail the next call to a route (`failNext`,
+ * for 429s and outages), ask for SSO or MFA before switching into an org
+ * (`stepUp`), answer slowly (`delayMs`), or change things mid-request
+ * (`beforeWrite`), as someone in the WorkOS dashboard might.
  */
 
 export const FAKE_API_KEY = "fake-workos-api-key"
@@ -47,6 +53,14 @@ export interface FakeWorkOS {
   roles: Set<string>
   /** Access token lifetime in seconds. Under a minute means every ticket refreshes. */
   accessTtl: number
+  /** Every API answer waits this long, so concurrent requests overlap. */
+  delayMs: number
+  /** Orgs that need another sign-in step: a refresh into them fails with this WorkOS error code (`sso_required`, `mfa_enrollment`…). */
+  readonly stepUp: Map<string, string>
+  /** Runs before a membership is changed or deleted (`PUT`/`DELETE /user_management/organization_memberships/:id`). */
+  beforeWrite: ((route: string) => void) | undefined
+  /** The next call to `route` ("METHOD /path") answers `status` with `body`, without doing anything. */
+  failNext(route: string, status: number, body: unknown): void
   /** The next hosted sign-in completes as this email, without showing the page. */
   signInAs(email: string | undefined): void
   user(email: string, first?: string, last?: string): User
@@ -67,6 +81,7 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
   const pending = new Map<string, string>() // pending authentication token → user id
   const calls: Array<string> = []
   let nextSignIn: string | undefined
+  const failures = new Map<string, { status: number; body: unknown }>()
 
   const fake: FakeWorkOS = {
     url: "",
@@ -78,6 +93,10 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
     calls,
     roles: new Set(["owner", "editor", "viewer", "admin", "member"]),
     accessTtl: 300,
+    delayMs: 0,
+    stepUp: new Map(),
+    beforeWrite: undefined,
+    failNext: (route, status, body) => void failures.set(route, { status, body }),
     signInAs: (email) => void (nextSignIn = email),
     user: (email, first, last) => {
       const existing = [...users.values()].find((u) => u.email === email)
@@ -149,7 +168,15 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
     res.writeHead(status, { "content-type": "application/json" })
     res.end(JSON.stringify(body))
   }
-  const list = (data: Array<unknown>) => ({ object: "list", data, list_metadata: { before: null, after: null } })
+  /** One page of a list, by `limit` (WorkOS's default is 10) and the `after` cursor (an item id). */
+  const list = (items: Array<{ id: string }>, url: URL) => {
+    const limit = Math.min(Number(url.searchParams.get("limit") ?? 10) || 10, 100)
+    const ordered = url.searchParams.get("order") === "desc" ? [...items].reverse() : items
+    const after = url.searchParams.get("after")
+    const start = after ? ordered.findIndex((x) => x.id === after) + 1 : 0
+    const data = ordered.slice(start, start + limit)
+    return { object: "list", data, list_metadata: { before: null, after: start + limit < ordered.length ? (data.at(-1)?.id ?? null) : null } }
+  }
   const notFound = (res: ServerResponse) => send(res, 404, { code: "entity_not_found", message: "Not found" })
   const bad = (res: ServerResponse, code: string, message: string) => send(res, 400, { code, error: code, message, error_description: message })
 
@@ -206,6 +233,12 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
     // --- The API ---------------------------------------------------------------------------------------
     calls.push(route)
     const body = req.method === "POST" || req.method === "PUT" ? await readBody(req) : {}
+    if (fake.delayMs) await new Promise((r) => setTimeout(r, fake.delayMs))
+    const failure = failures.get(route)
+    if (failure) {
+      failures.delete(route)
+      return send(res, failure.status, failure.body)
+    }
     if (route === "POST /user_management/authenticate") {
       if (body.client_id !== FAKE_CLIENT_ID || body.client_secret !== FAKE_API_KEY) return send(res, 401, { error: "invalid_client" })
       switch (body.grant_type) {
@@ -245,6 +278,12 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
           if (!s || s.ended) return bad(res, "invalid_grant", "Session has already ended.")
           const orgId = body.organization_id ?? s.orgId
           if (orgId && !fake.membershipOf(s.userId, orgId)) return bad(res, "invalid_grant", "The user isn't a member of that organization.")
+          const step = orgId && orgId !== s.orgId ? fake.stepUp.get(orgId) : undefined
+          if (step) {
+            // Like WorkOS's authentication errors: `error`/`error_description`. The refresh token stays good.
+            refreshTokens.set(body.refresh_token, s.id)
+            return send(res, 403, { error: step, error_description: "User must authenticate using one of the matching connections.", connection_ids: ["conn_fake"] })
+          }
           s.orgId = orgId
           return send(res, 200, authenticated(s))
         }
@@ -264,7 +303,9 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
       return send(res, 201, { object: "organization", ...fake.org(String(body.name)) })
     }
     if ((m = path.match(/^\/organizations\/([\w-]+)\/roles$/)) && req.method === "GET") {
-      return orgs.has(m[1]!) ? send(res, 200, list([...fake.roles].map((slug) => ({ object: "role", slug, name: slug, type: "EnvironmentRole" })))) : notFound(res)
+      return orgs.has(m[1]!)
+        ? send(res, 200, { object: "list", data: [...fake.roles].map((slug) => ({ object: "role", slug, name: slug, type: "EnvironmentRole" })) })
+        : notFound(res)
     }
     if ((m = path.match(/^\/organizations\/([\w-]+)$/)) && req.method === "GET") {
       const o = orgs.get(m[1]!)
@@ -284,7 +325,7 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
       const orgId = url.searchParams.get("organization_id")
       if (!userId && !orgId) return bad(res, "invalid_request", "user_id or organization_id is required")
       const found = [...memberships.values()].filter((x) => (!userId || x.user_id === userId) && (!orgId || x.organization_id === orgId))
-      return send(res, 200, list(found.map(toMembership)))
+      return send(res, 200, list(found.map(toMembership), url))
     }
     if (route === "POST /user_management/organization_memberships") {
       if (!users.has(body.user_id) || !orgs.has(body.organization_id)) return notFound(res)
@@ -295,6 +336,7 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
       const x = memberships.get(m[1]!)
       if (!x) return notFound(res)
       if (req.method === "GET") return send(res, 200, toMembership(x))
+      if (req.method === "PUT" || req.method === "DELETE") fake.beforeWrite?.(route)
       if (req.method === "PUT") {
         if (!fake.roles.has(body.role_slug)) return bad(res, "invalid_role", `Role ${body.role_slug} doesn't exist`)
         x.role = body.role_slug
@@ -316,7 +358,7 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
     })
     if (route === "GET /user_management/invitations") {
       const orgId = url.searchParams.get("organization_id")
-      return send(res, 200, list([...invitations.values()].filter((i) => !orgId || i.organization_id === orgId).map(toInvitation)))
+      return send(res, 200, list([...invitations.values()].filter((i) => !orgId || i.organization_id === orgId).map(toInvitation), url))
     }
     if (route === "POST /user_management/invitations") {
       if (!orgs.has(body.organization_id)) return notFound(res)

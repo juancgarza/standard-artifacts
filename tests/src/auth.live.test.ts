@@ -1,7 +1,12 @@
 import assert from "node:assert/strict"
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { after, before, describe, test } from "node:test"
 import { signTicket } from "../../apps/app/src/worker/tickets.ts"
 import { SESSION_COOKIE, TICKET_COOKIE } from "../../apps/app/src/worker/session.ts"
+import { images } from "./images.ts"
 import { bearer, startLive, TICKET_SECRET, Visitor, type LiveApp } from "./live-harness.ts"
 
 /**
@@ -81,10 +86,24 @@ describe("sign-in", () => {
   })
 
   test("return_to can't send anyone off-site", async () => {
-    for (const evil of ["//evil.test/x", "https://evil.test", "/\\evil.test"]) {
+    // Decoded values, as the query carries them: `?return_to=/%09/evil.test` is "/\t/evil.test".
+    for (const evil of ["//evil.test/x", "https://evil.test", "/\\evil.test", "/\t/evil.test", "/\n/evil.test", "/x\r\nSet-Cookie: a=b", "/.//evil.test", "/%2F/x/../../evil.test"]) {
       const v = new Visitor(app, `ret${Math.random().toString(36).slice(2)}@example.test`)
-      assert.equal(await v.signIn({ returnTo: evil }), "/", evil)
+      const landed = await v.signIn({ returnTo: evil })
+      assert.ok(landed === "/" || (landed.startsWith("/") && !landed.startsWith("//") && new URL(landed, app.base).origin === app.base), `${JSON.stringify(evil)} → ${landed}`)
     }
+    // Exactly as the reviewer sent it, encoded in the query: the browser gets "/", never a tab it would strip.
+    for (const query of ["/%09/evil.example", "%2F%5Cevil.example", "//evil.example", "https://evil.example", "/%0d%0aLocation:%20https://evil.example"]) {
+      const v = new Visitor(app, `raw${Math.random().toString(36).slice(2)}@example.test`)
+      app.fake.signInAs(v.email)
+      const login = await v.fetch(`/api/auth/login?return_to=${query}`)
+      const hosted = await v.fetch(login.headers.get("location")!)
+      const callback = await v.fetch(hosted.headers.get("location")!)
+      assert.equal(callback.headers.get("location"), "/", query)
+    }
+    // Paths on the app still work, query and hash included.
+    const ok = new Visitor(app, `retok${Math.random().toString(36).slice(2)}@example.test`)
+    assert.equal(await ok.signIn({ returnTo: "/boards/b_1?view=grid#top" }), "/boards/b_1?view=grid#top")
   })
 
   test("first sign-in makes “<First name>'s workspace” with them as owner", async () => {
@@ -110,12 +129,12 @@ describe("sign-in", () => {
     assert.equal(app.fake.orgs.size, orgsBefore)
   })
 
-  test("the ticket opens sockets with ?ticket=, and the ticket cookie covers <img> URLs", async () => {
+  test("the ticket opens sockets with ?ticket=, and the ticket cookie covers <img> URLs and nothing else", async () => {
     const v = await signedIn("sockets@example.test", "Sam")
     const url = `${app.base.replace(/^http/, "ws")}/api/v1/workspace/live`
-    const open = (u: string) =>
+    const open = (u: string, headers?: Record<string, string>) =>
       new Promise<boolean>((resolve) => {
-        const ws = new WebSocket(u)
+        const ws = new WebSocket(u, headers ? ({ headers } as never) : undefined)
         ws.onopen = () => {
           ws.close()
           resolve(true)
@@ -125,8 +144,22 @@ describe("sign-in", () => {
     assert.equal(await open(`${url}?ticket=${encodeURIComponent(v.ticket!)}`), true)
     assert.equal(await open(url), false)
     assert.ok(v.cookies.get(TICKET_COOKIE), "the ticket endpoint also sets the ticket cookie")
-    const viaCookie = await fetch(`${app.base}/api/v1/workspace`, { headers: { cookie: `${TICKET_COOKIE}=${v.cookies.get(TICKET_COOKIE)}` } })
-    assert.equal(viaCookie.status, 200)
+    const cookie = `${TICKET_COOKIE}=${v.cookies.get(TICKET_COOKIE)}`
+
+    // An image on a board: the cookie alone fetches it, as an <img> would.
+    const board = (await v.api("POST", "/artifacts", { kind: "board", title: "Pictures" })).body
+    const up = await fetch(`${app.base}/api/v1/artifacts/${board.id}/assets`, { method: "POST", headers: { "content-type": "image/png", authorization: `Bearer ${v.ticket}` }, body: images.png })
+    assert.equal(up.status, 201)
+    const { url: assetUrl } = await up.json()
+    assert.equal((await fetch(new URL(assetUrl, app.base), { headers: { cookie } })).status, 200)
+    assert.equal((await fetch(new URL(assetUrl, app.base))).status, 401)
+
+    // Nothing else takes it: not the API, not uploads, not sockets, not MCP.
+    assert.equal((await fetch(`${app.base}/api/v1/workspace`, { headers: { cookie } })).status, 401)
+    assert.equal((await fetch(`${app.base}/api/v1/artifacts/${board.id}/assets`, { method: "POST", headers: { "content-type": "image/png", cookie }, body: images.png })).status, 401)
+    assert.equal(await open(url, { cookie }), false)
+    const mcp = await fetch(`${app.base}/mcp`, { method: "POST", headers: { cookie, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: "{}" })
+    assert.equal(mcp.status, 401)
   })
 
   test("tickets are short-lived and signed; a forged or tampered one is refused", async () => {
@@ -188,6 +221,32 @@ describe("sign-in", () => {
       assert.equal(res.status, 401)
       assert.equal(v.cookies.get(SESSION_COOKIE), undefined)
       assert.equal(v.cookies.get(TICKET_COOKIE), undefined)
+    } finally {
+      app.fake.accessTtl = 300
+    }
+  })
+
+  test("WorkOS rate limits, outages and other refusals during a refresh keep the session; only a refused refresh token ends it", async () => {
+    app.fake.accessTtl = 30
+    try {
+      const v = await signedIn("flaky@example.test", "Fla")
+      const sealed = v.cookies.get(SESSION_COOKIE)
+      for (const [status, body] of [
+        [429, { message: "Too many requests" }],
+        [503, { message: "Service unavailable" }],
+        [403, { code: "something_else", message: "Not now" }],
+      ] as const) {
+        app.fake.failNext("POST /user_management/authenticate", status, body)
+        const res = await v.session()
+        assert.equal(res.status, 503, `${status}: ${JSON.stringify(res.body)}`)
+        assert.equal(v.cookies.get(SESSION_COOKIE), sealed, `${status} keeps the session cookie`)
+      }
+      // WorkOS is back: the same session refreshes fine.
+      assert.equal((await v.session()).status, 200)
+      // A refresh token WorkOS refuses (400 invalid_grant) is a session that's over.
+      app.fake.failNext("POST /user_management/authenticate", 400, { error: "invalid_grant", error_description: "Session has already ended." })
+      assert.equal((await v.session()).status, 401)
+      assert.equal(v.cookies.get(SESSION_COOKIE), undefined)
     } finally {
       app.fake.accessTtl = 300
     }
@@ -276,6 +335,40 @@ describe("orgs", () => {
     const refused = await v.post("/api/auth/switch", { orgId: theirs })
     assert.equal(refused.status, 403)
     assert.equal((await v.session()).body.org.id, first.id, "still where it was")
+  })
+
+  test("switching into an org that wants SSO or MFA is refused, and the session stays where it was", async () => {
+    const v = await signedIn("sso-switch@example.test", "Sso")
+    const home = (await v.session()).body.org.id
+    const strict = app.fake.org("Strict Corp")
+    app.fake.member(app.fake.user("sso-switch@example.test").id, strict.id, "editor")
+    for (const code of ["sso_required", "mfa_enrollment"]) {
+      app.fake.stepUp.set(strict.id, code)
+      const res = await v.post("/api/auth/switch", { orgId: strict.id })
+      assert.equal(res.status, 403, JSON.stringify(res.body))
+      assert.match(res.body.message, /SSO or MFA/)
+      assert.ok(v.cookies.get(SESSION_COOKIE), "still signed in")
+      assert.equal((await v.session()).body.org.id, home)
+    }
+    // A switch WorkOS is too busy for is "try again", not a sign-out either.
+    app.fake.stepUp.delete(strict.id)
+    app.fake.failNext("POST /user_management/authenticate", 429, { message: "Too many requests" })
+    assert.equal((await v.post("/api/auth/switch", { orgId: strict.id })).status, 503)
+    assert.equal((await v.session()).status, 200)
+    assert.equal((await v.post("/api/auth/switch", { orgId: strict.id })).status, 200)
+  })
+
+  test("one person can own at most 10 workspaces through New workspace", async () => {
+    const v = await signedIn("many-orgs@example.test", "Manny")
+    const user = app.fake.user("many-orgs@example.test")
+    for (let i = 0; i < 9; i++) app.fake.member(user.id, app.fake.org(`Org ${i}`).id, "owner")
+    // Being a member elsewhere doesn't count against it.
+    app.fake.member(user.id, app.fake.org("Someone else's").id, "editor")
+    const before = app.fake.orgs.size
+    const refused = await v.post("/api/auth/orgs", { name: "Eleventh" })
+    assert.equal(refused.status, 403, JSON.stringify(refused.body))
+    assert.match(refused.body.message, /10 workspaces/)
+    assert.equal(app.fake.orgs.size, before, "no org was made")
   })
 
   test("someone in several orgs lands in the one they last used", async () => {
@@ -380,6 +473,104 @@ describe("members and invitations", () => {
     assert.equal((await owner.api("PATCH", `/org/members/${m.id}`, { role: "editor" })).status, 200)
   })
 
+  test("an access token can list members but never change them or share links, even an owner's", async () => {
+    const owner = await signedIn("tok-admin@example.test", "Tad")
+    const orgId = (await owner.session()).body.org.id
+    const token = (await owner.createToken("cli")).body.token
+    const bob = app.fake.user("tok-admin-bob@example.test", "Bob")
+    const m = app.fake.member(bob.id, orgId, "editor")
+    const invite = (await owner.api("POST", "/org/invitations", { email: "tok-pending@example.test", role: "editor" })).body
+    const doc = (await owner.api("POST", "/artifacts", { kind: "doc", title: "Shared?" })).body
+
+    for (const headers of [{}, { "x-dev-as": "agent" }] as Array<Record<string, string>>) {
+      assert.equal((await bearer(app, token, "GET", "/org/members", undefined, headers)).status, 200)
+      const calls = [
+        ["POST", "/org/invitations", { email: "attacker@evil.test", role: "owner" }],
+        ["POST", `/org/invitations/${invite.id}/resend`, undefined],
+        ["DELETE", `/org/invitations/${invite.id}`, undefined],
+        ["PATCH", `/org/members/${m.id}`, { role: "owner" }],
+        ["DELETE", `/org/members/${m.id}`, undefined],
+        ["POST", `/artifacts/${doc.id}/link`, undefined],
+      ] as const
+      for (const [method, path, body] of calls) {
+        const res = await bearer(app, token, method, path, body, headers)
+        assert.equal(res.status, 403, `${method} ${path} ${JSON.stringify(headers)}: ${JSON.stringify(res.body)}`)
+      }
+    }
+    assert.ok(![...app.fake.invitations.values()].some((i) => i.email === "attacker@evil.test"))
+    assert.equal(app.fake.memberships.get(m.id)?.role, "editor")
+    assert.equal(app.fake.invitations.get(invite.id)?.state, "pending")
+    // The person, in the app, still can.
+    assert.equal((await owner.api("POST", `/artifacts/${doc.id}/link`)).status, 200)
+    assert.equal((await owner.api("PATCH", `/org/members/${m.id}`, { role: "viewer" })).status, 200)
+  })
+
+  test("two owners demoting or removing each other at once never leave the org without an owner", async () => {
+    for (const [method, body] of [
+      ["PATCH", { role: "editor" }],
+      ["DELETE", undefined],
+    ] as const) {
+      const tag = method.toLowerCase()
+      const a = await signedIn(`race-a-${tag}@example.test`, "Ana")
+      const orgId = (await a.session()).body.org.id
+      const bUser = app.fake.user(`race-b-${tag}@example.test`, "Ben")
+      const bm = app.fake.member(bUser.id, orgId, "owner")
+      const b = new Visitor(app, bUser.email)
+      await b.signIn()
+      await b.session()
+      const am = app.fake.membershipOf(app.fake.user(`race-a-${tag}@example.test`).id, orgId)!
+      // Slow answers, so without a lock both would read "two owners" before either writes.
+      app.fake.delayMs = 40
+      try {
+        const [ra, rb] = await Promise.all([a.api(method, `/org/members/${bm.id}`, body), b.api(method, `/org/members/${am.id}`, body)])
+        const statuses = [ra.status, rb.status].sort()
+        assert.equal(statuses.filter((s) => s < 300).length, 1, `${method}: exactly one goes through (${statuses})`)
+        assert.ok(statuses.some((s) => s === 400 || s === 403), `${method}: the other is refused (${statuses})`)
+      } finally {
+        app.fake.delayMs = 0
+      }
+      const left = [...app.fake.memberships.values()].filter((x) => x.organization_id === orgId && x.role === "owner")
+      assert.equal(left.length, 1, `${method}: one owner left`)
+    }
+  })
+
+  test("a demotion that would leave no owner (someone changed WorkOS meanwhile) is rolled back", async () => {
+    const a = await signedIn("rollback-a@example.test", "Rolla")
+    const orgId = (await a.session()).body.org.id
+    const am = app.fake.membershipOf(app.fake.user("rollback-a@example.test").id, orgId)!
+    const bm = app.fake.member(app.fake.user("rollback-b@example.test", "Rollo").id, orgId, "owner")
+    // While Rolla demotes Rollo, someone in the WorkOS dashboard demotes Rolla.
+    app.fake.beforeWrite = () => {
+      app.fake.beforeWrite = undefined
+      am.role = "member"
+    }
+    try {
+      const res = await a.api("PATCH", `/org/members/${bm.id}`, { role: "editor" })
+      assert.equal(res.status, 400, JSON.stringify(res.body))
+      assert.match(res.body.message, /without an owner/)
+    } finally {
+      app.fake.beforeWrite = undefined
+    }
+    assert.equal(app.fake.memberships.get(bm.id)?.role, "owner", "Rollo is an owner again")
+  })
+
+  test("members and invitations list past the first page", async () => {
+    const owner = await signedIn("paging@example.test", "Page")
+    const orgId = (await owner.session()).body.org.id
+    for (let i = 0; i < 130; i++) {
+      const id = `invitation_PAGE${String(i).padStart(4, "0")}${orgId.slice(-8)}`
+      app.fake.invitations.set(id, {
+        id, email: `p${i}@example.test`, organization_id: orgId, role_slug: "member", state: "pending", token: `tok${i}${orgId}`,
+        expires_at: new Date(Date.now() + 86400_000).toISOString(), created_at: new Date().toISOString(), resent: 0,
+      })
+    }
+    for (let i = 0; i < 105; i++) app.fake.member(app.fake.user(`pm${i}@example.test`, "P").id, orgId, "viewer")
+    const list = await owner.api("GET", "/org/members")
+    assert.equal(list.status, 200)
+    assert.equal(list.body.invitations.length, 130)
+    assert.equal(list.body.members.length, 106)
+  })
+
   test("a pending invitation can be revoked", async () => {
     const owner = await signedIn("rev-owner@example.test", "Rev")
     const sent = await owner.api("POST", "/org/invitations", { email: "revoked@example.test", role: "editor" })
@@ -411,7 +602,7 @@ describe("access tokens", () => {
   test("create (shown once), list, use as the person, use as their agent, revoke", async () => {
     const v = await signedIn("tok@example.test", "Toby")
     const me = await whoami(v)
-    const made = await v.api("POST", "/tokens", { name: "Claude Code" })
+    const made = await v.createToken("Claude Code")
     assert.equal(made.status, 200, JSON.stringify(made.body))
     assert.match(made.body.token, /^sat_[0-9a-f]+_[\w-]{32}$/)
     const listed = await v.api("GET", "/tokens")
@@ -446,6 +637,24 @@ describe("access tokens", () => {
     assert.equal((await bearer(app, made.body.token, "GET", "/workspace")).status, 401)
   })
 
+  test("making a token needs the browser's session, not just a ticket", async () => {
+    const v = await signedIn("tok-session@example.test", "Tes")
+    // A ticket on its own (say, one copied from a socket URL in a log) can't make a token.
+    const bare = await v.api("POST", "/tokens", { name: "from a leaked ticket" })
+    assert.equal(bare.status, 403, JSON.stringify(bare.body))
+    // Nor with someone else's session cookie beside it.
+    const other = await signedIn("tok-session-other@example.test", "Oth")
+    const mixed = await fetch(`${app.base}/api/v1/tokens`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${v.ticket}`, cookie: other.cookieHeader() },
+      body: JSON.stringify({ name: "mixed" }),
+    })
+    assert.equal(mixed.status, 403)
+    assert.equal((await v.api("GET", "/tokens")).body.length, 0)
+    // In the app, signed in: yes.
+    assert.equal((await v.createToken("laptop")).status, 200)
+  })
+
   test("a removed member's tokens stop working", async () => {
     const owner = await signedIn("tok-owner@example.test", "Tom")
     const orgId = (await owner.session()).body.org.id
@@ -454,7 +663,7 @@ describe("access tokens", () => {
     const member = new Visitor(app, "tok-member@example.test")
     await member.signIn()
     await member.session()
-    const token = (await member.api("POST", "/tokens", { name: "laptop" })).body.token
+    const token = (await member.createToken("laptop")).body.token
     assert.equal((await bearer(app, token, "GET", "/workspace")).status, 200)
     assert.equal((await owner.api("DELETE", `/org/members/${m.id}`)).status, 204)
     assert.equal((await bearer(app, token, "GET", "/workspace")).status, 401)
@@ -474,7 +683,7 @@ describe("isolation between orgs", () => {
     const doc = (await ann.api("POST", "/artifacts", { kind: "doc", title: "Ann's secret" })).body
     const invite = (await ann.api("POST", "/org/invitations", { email: "iso-friend@example.test", role: "viewer" })).body
     const annMembership = app.fake.membershipOf(app.fake.user("iso-ann@example.test").id, annOrg)!
-    const annToken = (await ann.api("POST", "/tokens", { name: "ann" })).body
+    const annToken = (await ann.createToken("ann")).body
 
     const carl = await signedIn("iso-carl@example.test", "Carl")
     assert.notEqual((await carl.session()).body.org.id, annOrg)
@@ -509,6 +718,47 @@ describe("isolation between orgs", () => {
 })
 
 describe("live mode without its config", () => {
+  test("an access token made before the config broke stops working after the grace period instead of keeping its role", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sa-live-"))
+    try {
+      const first = await startLive({}, { persist: dir })
+      let token: string
+      try {
+        const v = new Visitor(first, "broken-later@example.test")
+        first.fake.user(v.email, "Bro")
+        await v.signIn()
+        await v.session()
+        token = (await v.createToken("cli")).body.token
+        assert.equal((await bearer(first, token, "GET", "/workspace")).status, 200)
+      } finally {
+        await first.close()
+      }
+      // Last checked with WorkOS over an hour ago.
+      const sqlite = (d: string): Array<string> =>
+        readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? sqlite(join(d, f)) : f.endsWith(".sqlite") ? [join(d, f)] : []))
+      let aged = 0
+      for (const file of sqlite(dir)) {
+        const db = new DatabaseSync(file)
+        try {
+          if (db.prepare("SELECT name FROM sqlite_master WHERE name = 'api_tokens'").get()) aged += Number(db.prepare("UPDATE api_tokens SET checked_at = 0").run().changes)
+        } finally {
+          db.close()
+        }
+      }
+      assert.equal(aged, 1)
+      const broken = await startLive({ WORKOS_API_KEY: undefined }, { persist: dir })
+      try {
+        const res = await bearer(broken, token, "GET", "/workspace")
+        assert.equal(res.status, 401, JSON.stringify(res.body))
+        assert.match(res.body.message, /Couldn't check this access token/)
+      } finally {
+        await broken.close()
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("fails loudly with what's missing, and never acts as the dev owner", async () => {
     const broken = await startLive({ WORKOS_API_KEY: undefined, WORKOS_COOKIE_PASSWORD: "short" })
     try {

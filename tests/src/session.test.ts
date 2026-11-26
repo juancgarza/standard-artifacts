@@ -4,6 +4,7 @@ import {
   accessClaims,
   apiTokenOrg,
   cookieKey,
+  cookieName,
   displayName,
   hashApiToken,
   newApiToken,
@@ -110,10 +111,51 @@ describe("WorkOS access tokens", () => {
 
 describe("redirects, cookies and config", () => {
   test("return_to stays on this app", () => {
-    assert.equal(safeReturnTo("/boards/b_1?x=1"), "/boards/b_1?x=1")
-    for (const evil of ["//evil.test", "https://evil.test", "/\\evil.test", "evil", "/api/auth/logout", "/x\r\nSet-Cookie: a=b", null, undefined]) {
-      assert.equal(safeReturnTo(evil), "/", String(evil))
+    const app = "https://app.example.com"
+    assert.equal(safeReturnTo("/boards/b_1?x=1", app), "/boards/b_1?x=1")
+    assert.equal(safeReturnTo("/boards/b_1?x=1#top", app), "/boards/b_1?x=1#top")
+    assert.equal(safeReturnTo("/a/../settings", app), "/settings", "normalized, still a path here")
+    for (const evil of [
+      "//evil.test",
+      "https://evil.test",
+      "/\\evil.test",
+      "\\\\evil.test",
+      "/\t/evil.test", // ?return_to=/%09/evil.test: browsers drop the tab and land on //evil.test
+      "/\n/evil.test",
+      "/\r/evil.test",
+      "/x\r\nSet-Cookie: a=b", // an encoded newline
+      "/\u0000/evil.test",
+      "/\u007f/evil.test",
+      "/.//evil.test", // resolves to the path //evil.test
+      "/./\\evil.test",
+      "evil",
+      "",
+      "/api/auth/logout",
+      "/" + "x".repeat(1000),
+      null,
+      undefined,
+    ]) {
+      const out = safeReturnTo(evil, app)
+      assert.equal(out, "/", JSON.stringify(evil))
     }
+    // Whatever comes back resolves to this app's origin.
+    for (const tricky of ["/%2F%2Fevil.test", "/%5Cevil.test", "/@evil.test", "/:evil.test", "/x?next=//evil.test"]) {
+      const out = safeReturnTo(tricky, app)
+      assert.ok(out.startsWith("/") && !out.startsWith("//"), `${tricky} → ${out}`)
+      assert.equal(new URL(out, app).origin, app, tricky)
+    }
+  })
+
+  test("credential cookies get the __Host- prefix wherever they're Secure, and keep their name on plain-http localhost", () => {
+    assert.equal(cookieName("https://app.example.com/api/auth/ticket", "standard_artifacts_session"), "__Host-standard_artifacts_session")
+    assert.equal(cookieName("https://localhost:8443/x", "n"), "__Host-n")
+    assert.equal(cookieName("http://localhost:5173/x", "n"), "n")
+    assert.equal(cookieName("http://127.0.0.1:4747/x", "n"), "n")
+    assert.equal(cookieName("/relative", "n"), "__Host-n", "unknown origin: assume production")
+    // __Host- needs Secure, Path=/ and no Domain, which setCookie always gives where the prefix applies.
+    const c = setCookie("https://app.example.com/x", cookieName("https://app.example.com/x", "n"), "v", 10)
+    assert.match(c, /^__Host-n=v; Path=\/;.*; Secure$/)
+    assert.doesNotMatch(c, /Domain=/i)
   })
 
   test("cookies are HttpOnly, SameSite=Lax, and Secure except over plain http to this machine", () => {
