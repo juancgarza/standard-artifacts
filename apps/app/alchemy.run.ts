@@ -64,7 +64,8 @@ const state = Layer.unwrap(
 const RunnerImage = Cloudflare.Container("Runner", {
   schedulingPolicy: "durable_object",
   context: `${import.meta.dirname}/../..`,
-  dockerfile: "apps/runner/Dockerfile",
+  // Absolute: Alchemy resolves the Dockerfile from the working directory (apps/app), not from `context`.
+  dockerfile: `${import.meta.dirname}/../runner/Dockerfile`,
 })
 
 /**
