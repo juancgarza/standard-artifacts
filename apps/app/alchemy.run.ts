@@ -96,6 +96,7 @@ export const App = Cloudflare.Website.StaticSite(
       DOC: Cloudflare.DurableObject("DocCell"),
       TRACKER: Cloudflare.DurableObject("TrackerCell"),
       MCP: Cloudflare.DurableObject("McpCell"),
+      OAUTH: Cloudflare.DurableObject("OAuthCell"),
       // Hosted agent runs need Docker to build, so dev stages stay without them and use `stdartifacts agent serve`.
       ...(!stack.stage.startsWith("dev") && { RUNNER: Cloudflare.DurableObject("RunnerCell", { containers: [Runner] }) }),
       ...(process.env.ANTHROPIC_API_KEY && { ANTHROPIC_API_KEY: Redacted.make(process.env.ANTHROPIC_API_KEY) }),
@@ -119,7 +120,7 @@ export const App = Cloudflare.Website.StaticSite(
       ...(process.env.TURBOPUFFER_API_KEY && { TURBOPUFFER_API_KEY: Redacted.make(process.env.TURBOPUFFER_API_KEY) }),
       ...(process.env.TURBOPUFFER_URL && { TURBOPUFFER_URL: process.env.TURBOPUFFER_URL }),
     },
-    assets: { notFoundHandling: "single-page-application", runWorkerFirst: ["/api/*", "/mcp"] },
+    assets: { notFoundHandling: "single-page-application", runWorkerFirst: ["/api/*", "/mcp", "/mcp/*", "/.well-known/oauth-*"] },
     ...hosted(stack.stage),
     dev: { port: 1337, strictPort: true },
   })),

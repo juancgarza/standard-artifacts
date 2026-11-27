@@ -5,6 +5,7 @@ import { Api, Authentication, CurrentPrincipal, Forbidden, Invalid, ValidationEr
 import { Accounts } from "./accounts"
 import { Auth, GUEST_COOKIE, SHARE_COOKIE, bearer, fromAccessToken } from "./auth"
 import { Billing } from "./billing"
+import { OAuthServer } from "./oauth-server"
 import { SESSION_COOKIE, cookieName, userActorId } from "./session"
 import { Rooms, Search, Workspaces } from "./services"
 
@@ -156,6 +157,7 @@ export const OrgHandlers = HttpApiBuilder.group(
   Effect.fn("Http.org")(function* (handlers) {
     const accounts = yield* Accounts
     const workspaces = yield* Workspaces
+    const oauth = yield* OAuthServer
     return handlers.handleAll({
       members: () => Effect.flatMap(CurrentPrincipal, (p) => accounts.members(p)),
       // Listing is fine with a token; every change needs a person at the app.
@@ -163,12 +165,13 @@ export const OrgHandlers = HttpApiBuilder.group(
       resendInvitation: ({ params }) => Effect.flatMap(notViaToken(MANAGE_BY_TOKEN), (p) => accounts.resendInvitation(p, params.id)),
       revokeInvitation: ({ params }) => Effect.flatMap(notViaToken(MANAGE_BY_TOKEN), (p) => accounts.revokeInvitation(p, params.id)),
       updateMember: ({ params, payload }) => Effect.flatMap(notViaToken(MANAGE_BY_TOKEN), (p) => accounts.updateMember(p, params.id, payload.role)),
-      // Whoever leaves takes their access tokens with them.
+      // Whoever leaves takes their access tokens with them, and their connected agents are refused until they're back.
       removeMember: ({ params }) =>
         Effect.gen(function* () {
           const p = yield* notViaToken(MANAGE_BY_TOKEN)
           const userId = yield* accounts.removeMember(p, params.id)
           yield* workspaces.revokeUserTokens(p, userId)
+          yield* oauth.memberRemoved(p, userId)
         }),
     })
   }),
@@ -241,6 +244,27 @@ export const TokensHandlers = HttpApiBuilder.group(
           return yield* workspaces.createToken(p, payload.name)
         }),
       revoke: ({ params }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.revokeToken(p, params.id)),
+    })
+  }),
+)
+
+export const ConnectionsHandlers = HttpApiBuilder.group(
+  Api,
+  "connections",
+  Effect.fn("Http.connections")(function* (handlers) {
+    const oauth = yield* OAuthServer
+    const origin = Effect.map(HttpServerRequest.HttpServerRequest, (request) => oauth.origin(new Request(new URL(request.originalUrl).origin)))
+    /** Seeing and disconnecting agents is for a person in the app, not for an agent or a token. */
+    const person = notViaToken("Manage connected agents in Settings, not with a token.")
+    return handlers.handleAll({
+      list: () =>
+        Effect.gen(function* () {
+          const p = yield* person
+          const base = yield* origin
+          const agents = oauth.enabled ? yield* oauth.connections(p, base) : []
+          return { mcpUrl: `${base}/mcp`, oauth: oauth.enabled, agents, everyone: p.role === "owner" }
+        }),
+      disconnect: ({ params }) => Effect.flatMap(person, (p) => oauth.disconnect(p, params.id)),
     })
   }),
 )

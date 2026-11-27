@@ -1,10 +1,13 @@
 import { Config, Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect"
-import { Ticket, Unauthorized, type ArtifactKind, type Principal } from "@standard-artifacts/protocol"
+import { Forbidden, Ticket, Unauthorized, Unavailable, type ArtifactKind, type Principal, type Role } from "@standard-artifacts/protocol"
 import { Accounts } from "./accounts"
 import { Billing } from "./billing"
+import type { Grant } from "./cells/grants"
 import type { ResolvedToken } from "./cells/workspace-cell"
 import { Bindings } from "./env"
-import { TICKET_COOKIE, agentRole, apiTokenOrg, cookieName, hashApiToken } from "./session"
+import { agentIdOf, hashSecret, secretOrg } from "./oauth"
+import { TICKET_COOKIE, TICKET_TTL_S, agentRole, apiTokenOrg, cookieName, hashApiToken } from "./session"
+import { signTicket } from "./tickets"
 
 /**
  * What a transport could find on a request. HTTP reads headers and cookies;
@@ -33,12 +36,26 @@ export interface SharedArtifact {
   readonly kind: ArtifactKind
 }
 
+/** An OAuth access token (`sao_…`, remote MCP only), resolved: the agent it acts as, and its grant. */
+export interface GrantAccess {
+  readonly principal: Principal
+  readonly grant: Grant
+}
+
 export class Auth extends Context.Service<
   Auth,
   {
     readonly resolve: (credentials: Credentials) => Effect.Effect<Principal, Unauthorized>
     /** Look up a share token; fails when the link was turned off. */
     readonly shared: (token: string) => Effect.Effect<SharedArtifact, Unauthorized>
+    /**
+     * An OAuth access token, for /mcp. Unauthorized when it's unknown, expired or
+     * revoked (the client signs in again); Forbidden when the grant is fine but
+     * its person left the org; Unavailable when the account service can't say.
+     */
+    readonly grant: (token: string) => Effect.Effect<GrantAccess, Unauthorized | Forbidden | Unavailable>
+    /** A short ticket for a grant's principal, which the McpCell sends to the API in-process (see routeMcp). */
+    readonly ticketFor: (principal: Principal) => Effect.Effect<string>
   }
 >()("@standard-artifacts/Auth") {
   /**
@@ -60,6 +77,12 @@ export class Auth extends Context.Service<
    * `x-dev-as: agent` (what `stdartifacts mcp` sends) the same token acts as an
    * agent for that person, never above editor. On Free limits (billing on) an
    * Editor's token reads only, as their tickets do.
+   *
+   * OAuth access tokens: `sao_…` (see oauth.ts) work only at /mcp, the resource
+   * they were issued for. They act as the client's agent for the person who
+   * approved it, in the org they picked, with the access they chose, under
+   * their current role and the plan. The API never takes them; the McpCell
+   * reaches the API with a ticket minted for that principal instead.
    */
   static readonly layer = Layer.effect(
     Auth,
@@ -98,7 +121,12 @@ export class Auth extends Context.Service<
         if (Result.isFailure(decoded) || decoded.success.exp * 1000 < Date.now()) {
           return yield* unauthorized("Expired or malformed ticket")
         }
-        const { exp: _exp, ...principal } = decoded.success
+        const { exp: _exp, via, ...principal } = decoded.success
+        // A remote MCP session signed in with OAuth: an agent with an access token's limits, never renamed by a header.
+        if (via === "grant") {
+          fromAccessToken.add(principal)
+          fromGrant.add(principal)
+        }
         return principal
       })
 
@@ -166,6 +194,9 @@ export class Auth extends Context.Service<
 
       const principalOf = Effect.fn("Auth.principalOf")(function* (c: Credentials) {
         const token = c.bearer ?? c.ticket ?? c.cookie
+        if (token?.startsWith("sao_") || token?.startsWith("sar_")) {
+          return yield* unauthorized("This token is for the MCP server at /mcp. For the API, use an access token from Settings → Access tokens.")
+        }
         if (token?.startsWith("sh.")) return yield* guestOf(token, c.guest)
         if (token?.startsWith("sat_")) return yield* viaToken(token, c.devAs)
         if (token) return yield* verify(token)
@@ -177,12 +208,54 @@ export class Auth extends Context.Service<
       })
       const resolve = (c: Credentials) =>
         Effect.map(principalOf(c), (p) => {
+          if (fromGrant.has(p)) return p
           const labeled = fromClient(p, c.client)
           if (labeled !== p && fromAccessToken.has(p)) fromAccessToken.add(labeled)
           return labeled
         })
 
-      return Auth.of({ resolve, shared })
+      const grant = Effect.fn("Auth.grant")(function* (token: string) {
+        const orgId = secretOrg("access", token)
+        if (!orgId) return yield* unauthorized("Invalid access token")
+        const hash = yield* Effect.promise(() => hashSecret(token))
+        const cell = cellOf(orgId)
+        const found = yield* Effect.promise(async () => await cell.resolveOAuthToken(hash))
+        if (!found) return yield* unauthorized("This sign-in expired or was disconnected. Sign in again.")
+        const { grant } = found
+        let role = grant.role
+        const age = Date.now() - grant.checkedAt
+        if (age > TOKEN_CHECK_MS) {
+          const current = yield* Effect.exit(accounts.currentRole(orgId, grant.userId))
+          if (current._tag === "Failure") {
+            if (age > TOKEN_GRACE_MS) return yield* new Unavailable({ message: "Couldn't check this connection with the account service. Try again in a moment." })
+          } else if (current.value !== undefined) {
+            role = current.value ?? "removed"
+            yield* Effect.promise(async () => void (await cell.oauthRoleChecked(grant.userId, role)))
+          }
+        }
+        if (!isRole(role)) {
+          return yield* new Forbidden({
+            message: `${grant.userName} isn't a member of ${found.orgName} anymore, so ${grant.agentName} can't act there. Ask an owner to add them back, or disconnect it in Settings → Connections.`,
+          })
+        }
+        // As for access tokens: the role under the plan now, then never above editor for an agent, and read only if that's what was granted.
+        const allowed = agentRole(billing.effectiveRole(role, found.plan))
+        const principal: Principal = {
+          orgId,
+          orgName: found.orgName,
+          plan: found.plan,
+          role: grant.access === "read" ? "viewer" : allowed,
+          actor: { type: "agent", id: agentIdOf(grant.agentName), onBehalfOf: grant.userId, name: grant.agentName },
+        }
+        fromAccessToken.add(principal)
+        fromGrant.add(principal)
+        return { principal, grant } satisfies GrantAccess
+      })
+
+      const signing = Option.isSome(secret) ? Redacted.value(secret.value) : ""
+      const ticketFor = (principal: Principal) => Effect.promise(() => signTicket(signing, principal, TICKET_TTL_S, Date.now(), "grant"))
+
+      return Auth.of({ resolve, shared, grant, ticketFor })
     }).pipe(Effect.orDie),
   )
 }
@@ -194,6 +267,11 @@ export class Auth extends Context.Service<
  * principal is the signed contract cells see.)
  */
 export const fromAccessToken = new WeakSet<Principal>()
+
+/** Principals of an agent signed in with OAuth: their name comes from the grant, not from a header. */
+const fromGrant = new WeakSet<Principal>()
+
+const isRole = (role: string): role is Role => role === "owner" || role === "editor" || role === "viewer"
 
 const decodeTicket = Schema.decodeUnknownResult(Schema.fromJsonString(Ticket))
 

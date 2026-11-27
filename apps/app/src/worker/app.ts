@@ -1,15 +1,16 @@
-import { ConfigProvider, Effect, Layer, ManagedRuntime } from "effect"
+import { Cause, ConfigProvider, Effect, Exit, Layer, ManagedRuntime, Option } from "effect"
 import { HttpRouter, HttpServer } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
-import { Api, kinds, type Principal } from "@standard-artifacts/protocol"
+import { Api, kinds, type McpWhoami, type Principal } from "@standard-artifacts/protocol"
 import { Accounts } from "./accounts"
-import { Auth, GUEST_COOKIE, SHARE_COOKIE, credentialsFromRequest, readCookie } from "./auth"
+import { Auth, GUEST_COOKIE, SHARE_COOKIE, bearer, credentialsFromRequest, readCookie, type GrantAccess } from "./auth"
 import { authRoute, isAuthPath } from "./auth-routes"
 import { Billing } from "./billing"
 import { Bindings, type Env } from "./env"
 import {
   AuthenticationLive,
   BillingHandlers,
+  ConnectionsHandlers,
   MentionsHandlers,
   OrgHandlers,
   RoomsHandlers,
@@ -21,12 +22,16 @@ import {
 } from "./http"
 import { Rooms, Search, Workspaces } from "./services"
 import { mcpCellName } from "./cells/mcp-cell"
+import { isOAuthPath, oauthRoute } from "./oauth-routes"
+import { OAuthServer } from "./oauth-server"
 
 /**
  * The Worker's request handling. Static assets (the SPA) are served before this
  * runs, except for /api/* and /mcp, which `runWorkerFirst` routes here.
  *
  *   /mcp                remote MCP (Streamable HTTP), served by the caller's McpCell
+ *   /mcp/whoami         who a bearer token acts as (person, org, access, client)
+ *   /.well-known/oauth-*, /api/oauth/*  remote MCP sign-in (OAuth): see oauth.ts
  *   /api/v1/rooms/:id   WebSocket upgrade into an artifact's cell (raw socket, outside HttpApi)
  *   /api/v1/workspace/live  WebSocket into the org's cell: says when the index changed
  *   /api/v1/share/:token  open a share link: sets a cookie, redirects to the artifact
@@ -38,7 +43,7 @@ import { mcpCellName } from "./cells/mcp-cell"
 
 /** Services for one isolate. Workers env is constant per isolate, so build once. */
 const services = (env: Env) =>
-  Layer.mergeAll(Auth.layer, Rooms.layer, Search.layer).pipe(
+  Layer.mergeAll(Auth.layer, Rooms.layer, Search.layer, OAuthServer.layer).pipe(
     Layer.provideMerge(Workspaces.layer),
     Layer.provideMerge(Accounts.layer),
     Layer.provideMerge(Billing.layer),
@@ -51,7 +56,7 @@ const build = (env: Env) => {
   const runtime = ManagedRuntime.make(layer)
   const api = HttpRouter.toWebHandler(
     HttpApiBuilder.layer(Api).pipe(
-      Layer.provide([WorkspaceHandlers, RoomsHandlers, MentionsHandlers, SharingHandlers, SearchHandlers, OrgHandlers, TokensHandlers, BillingHandlers]),
+      Layer.provide([WorkspaceHandlers, RoomsHandlers, MentionsHandlers, SharingHandlers, SearchHandlers, OrgHandlers, TokensHandlers, ConnectionsHandlers, BillingHandlers]),
       Layer.provide([AuthenticationLive, ValidationErrorsLive]),
       Layer.provide(layer),
       Layer.provide(HttpServer.layerServices),
@@ -72,6 +77,8 @@ export function handle(request: Request, env: Env): Promise<Response> {
   app ??= build(env)
   const url = new URL(request.url)
   if (url.pathname === "/mcp") return app.runtime.runPromise(routeMcp(request, env))
+  if (url.pathname === "/mcp/whoami") return app.runtime.runPromise(whoami(request))
+  if (isOAuthPath(url.pathname)) return app.runtime.runPromise(oauthRoute(request))
   if (isAuthPath(url.pathname)) return app.runtime.runPromise(authRoute(request, env))
   if (url.pathname === "/api/billing/webhook" && request.method === "POST") {
     return app.runtime.runPromise(Effect.gen(function* () {
@@ -191,19 +198,88 @@ const exitShare = (request: Request) =>
  * principal, so each principal gets its own McpCell: authenticate here, then
  * hand the request to that cell. Without `x-dev-as`, dev requests act as an
  * agent (as `stdartifacts mcp` does); live tickets say who's acting.
+ *
+ * Signed in with OAuth (`sao_…`), the token is checked here and never goes
+ * further: the cell gets a short ticket for the grant's agent instead, which
+ * is all its in-process API calls carry. A token that's unknown, expired or
+ * revoked answers 401 with where to sign in (RFC 9728), so the client signs
+ * in again; a grant whose person left the org answers 403, since signing in
+ * again wouldn't help.
  */
 const routeMcp = (request: Request, env: Env) =>
   Effect.gen(function* () {
+    const auth = yield* Auth
+    const token = bearer(request.headers.get("authorization") ?? undefined)
+    if (token?.startsWith("sao_")) {
+      const exit = yield* Effect.exit(auth.grant(token))
+      if (exit._tag === "Failure") return yield* refused(request, exit)
+      const { principal } = exit.value
+      const headers = new Headers(request.headers)
+      headers.set("authorization", `Bearer ${yield* auth.ticketFor(principal)}`)
+      headers.delete("cookie")
+      headers.delete("x-dev-as")
+      const cell = env.MCP.get(env.MCP.idFromName(mcpCellName(principal)))
+      return yield* Effect.promise(() => cell.fetch(new Request(request, { headers })))
+    }
     const headers = new Headers(request.headers)
     if (!headers.has("x-dev-as")) headers.set("x-dev-as", "agent")
     const forwarded = new Request(request, { headers })
-    const exit = yield* Effect.exit((yield* Auth).resolve(credentialsFromRequest(forwarded)))
-    if (exit._tag === "Failure") {
-      return Response.json(
-        { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Sign in to use this MCP server: Authorization: Bearer <token>, with a token from Settings → Access tokens." } },
-        { status: 401, headers: { "www-authenticate": 'Bearer realm="standard-artifacts"' } },
-      )
-    }
+    const exit = yield* Effect.exit(auth.resolve(credentialsFromRequest(forwarded)))
+    if (exit._tag === "Failure") return yield* refused(request, exit)
     const cell = env.MCP.get(env.MCP.idFromName(mcpCellName(exit.value)))
     return yield* Effect.promise(() => cell.fetch(forwarded))
   }).pipe(Effect.withSpan("Http.routeMcp"))
+
+type Refusal = { readonly _tag: "Unauthorized" | "Forbidden" | "Unavailable"; readonly message: string }
+
+/**
+ * A refused MCP request, as a JSON-RPC error. 401 says where to sign in
+ * (`resource_metadata`, RFC 9728) when this server signs agents in, and
+ * `invalid_token` when a token was sent but won't do (RFC 6750).
+ */
+const refused = (request: Request, exit: Exit.Exit<unknown, Refusal>) =>
+  Effect.gen(function* () {
+    const oauth = yield* OAuthServer
+    const failure = Cause.findErrorOption(exit._tag === "Failure" ? exit.cause : Cause.empty)
+    const error: Refusal = Option.isSome(failure) ? failure.value : { _tag: "Unauthorized", message: "Sign in required" }
+    const sent = request.headers.has("authorization")
+    if (error._tag === "Forbidden") return rpcError(403, -32003, error.message)
+    if (error._tag === "Unavailable") return rpcError(503, -32603, error.message, { "retry-after": "30" })
+    const challenge = oauth.enabled
+      ? `Bearer resource_metadata="${oauth.origin(request)}/.well-known/oauth-protected-resource/mcp"${sent ? `, error="invalid_token", error_description="${error.message.replace(/["\\]/g, "")}"` : ""}`
+      : 'Bearer realm="standard-artifacts"'
+    const message = oauth.enabled
+      ? sent
+        ? `${error.message}`
+        : "Sign in to use this MCP server: add it to your client by URL and sign in in the browser, or send Authorization: Bearer <token> with a token from Settings → Access tokens."
+      : "Sign in to use this MCP server: Authorization: Bearer <token>, with a token from Settings → Access tokens."
+    return rpcError(401, -32001, message, { "www-authenticate": challenge })
+  })
+
+const rpcError = (status: number, code: number, message: string, headers: Record<string, string> = {}) =>
+  Response.json({ jsonrpc: "2.0", id: null, error: { code, message } }, { status, headers: { "cache-control": "no-store", ...headers } })
+
+/** `GET /mcp/whoami`: who a bearer token acts as. Answers 401 and 403 as /mcp does. */
+const whoami = (request: Request) =>
+  Effect.gen(function* () {
+    const auth = yield* Auth
+    if (request.method !== "GET") return Response.json({ _tag: "NotFound", message: "Not found" }, { status: 404 })
+    const token = bearer(request.headers.get("authorization") ?? undefined)
+    const describe = (p: Principal, grant: GrantAccess["grant"] | undefined): McpWhoami => ({
+      person: p.actor.type === "agent" ? { id: p.actor.onBehalfOf, name: grant?.userName ?? "" } : { id: p.actor.id, name: p.actor.type === "user" ? p.actor.name : "Guest" },
+      organization: { id: p.orgId, name: p.orgName },
+      access: p.role === "viewer" ? "read" : "write",
+      role: p.role,
+      client: grant ? { id: grant.clientId, name: grant.clientName, agentName: grant.agentName } : null,
+      via: grant ? "oauth" : "access-token",
+    })
+    if (token?.startsWith("sao_")) {
+      const exit = yield* Effect.exit(auth.grant(token))
+      if (exit._tag === "Failure") return yield* refused(request, exit)
+      return Response.json(describe(exit.value.principal, exit.value.grant), { headers: { "cache-control": "no-store" } })
+    }
+    // An access token, as the person who made it (over /mcp it acts as their agent, with the same access).
+    const exit = yield* Effect.exit(auth.resolve({ ...credentialsFromRequest(request), devAs: undefined, client: undefined }))
+    if (exit._tag === "Failure") return yield* refused(request, exit)
+    return Response.json(describe(exit.value, undefined), { headers: { "cache-control": "no-store" } })
+  }).pipe(Effect.withSpan("Http.whoami"))

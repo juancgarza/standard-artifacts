@@ -10,7 +10,7 @@
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/mcp"]
+    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/.well-known/oauth-*"]
   },
   "vars": {
     // "dev" lets requests without a ticket act as a local owner. Never set in production.
@@ -32,7 +32,8 @@
       { "name": "BOARD", "class_name": "BoardCell" },
       { "name": "DOC", "class_name": "DocCell" },
       { "name": "TRACKER", "class_name": "TrackerCell" },
-      { "name": "MCP", "class_name": "McpCell" }
+      { "name": "MCP", "class_name": "McpCell" },
+      { "name": "OAUTH", "class_name": "OAuthCell" }
     ]
   },
   "migrations": [
@@ -40,6 +41,7 @@
     { "tag": "v2", "new_sqlite_classes": ["TableCell"] },
     { "tag": "v3", "new_sqlite_classes": ["BoardCell", "DocCell"] },
     { "tag": "v4", "new_sqlite_classes": ["McpCell"] },
-    { "tag": "v5", "new_sqlite_classes": ["TrackerCell"] }
+    { "tag": "v5", "new_sqlite_classes": ["TrackerCell"] },
+    { "tag": "v6", "new_sqlite_classes": ["OAuthCell"] }
   ]
 }

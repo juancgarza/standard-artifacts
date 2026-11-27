@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint as E, HttpApiGroup, HttpApiMiddleware } from "effect/http-api"
 import { ApiToken, BillingInfo, BillingRedirect, CreateApiToken, CreatedApiToken, InviteMember, OrgInvitation, OrgMember, OrgMembers, StartCheckout, UpdateMember } from "./account.ts"
 import { BoardState } from "./board.ts"
+import { Connections } from "./connections.ts"
 import { Artifact, ArtifactAccess, CreateArtifact, CreateFolder, CurrentPrincipal, Folder, Id, MoveArtifact, OrgDirectory, ShareLink, UpdateArtifact, UpdateFolder, WorkspaceSnapshot } from "./core.ts"
 import { DocState } from "./doc.ts"
 import { ClaimMention, CompleteMention, CreateMention, Mention } from "./mention.ts"
@@ -162,6 +163,19 @@ export const TokensGroup = HttpApiGroup.make("tokens")
   .middleware(Authentication)
 
 /**
+ * Agents connected with OAuth (Claude, ChatGPT, Codex…), for Settings →
+ * Connections. People see their own; owners see the whole org's and can
+ * disconnect any. Disconnecting takes effect on the agent's next request.
+ */
+export const ConnectionsGroup = HttpApiGroup.make("connections")
+  .add(
+    E.get("list", "/connections", { success: Connections, error: AccountErrors }),
+    E.delete("disconnect", "/connections/:id", { params, error: AccountErrors }),
+  )
+  .middleware(ValidationErrors)
+  .middleware(Authentication)
+
+/**
  * The org's plan and its Team subscription on Stripe. Everyone in the org can
  * read it; owners start Checkout and open the customer portal. On a server
  * without Stripe, `info` says billing is off and the rest answer Unavailable.
@@ -185,5 +199,6 @@ export const Api = HttpApi.make("StandardArtifacts")
   .add(SearchGroup)
   .add(OrgGroup)
   .add(TokensGroup)
+  .add(ConnectionsGroup)
   .add(BillingGroup)
   .prefix("/api/v1")
