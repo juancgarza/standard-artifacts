@@ -27,7 +27,7 @@ Live mode (`AUTH_MODE=live`, the default outside dev stages) signs people in wit
    - Initiate login URI (where AuthKit sends people whose sign-in didn't start in the app, such as from an invitation or a password reset): `<APP_URL>/api/auth/login`.
    - Sign-out URI: `<APP_URL>/`. Without it, signing out ends on a WorkOS error page.
 3. **Roles.** Create three roles with the slugs `owner`, `editor` and `viewer`, and make `editor` the default role for new members. Without them the app falls back to WorkOS's default `admin` (owner) and `member` (editor) roles; inviting a viewer then fails with a message saying the role is missing, rather than granting more. Any other slug counts as viewer.
-4. **Organizations.** Nothing to create: someone who signs in without one gets "<First name>'s workspace" as its owner. An org's plan is its metadata key `plan` (`free`, the default, or `team`).
+4. **Organizations.** Nothing to create: someone who signs in without one gets "<First name>'s workspace" as its owner. An org's plan is its metadata key `plan` (`free`, the default, or `team`). Without billing configured, set it by hand; with billing, Stripe's webhook writes it (see [Billing](#billing-cloud)).
 5. **Invitations.** Owners invite from Settings → Members, and WorkOS sends the email. Its link signs the person in through AuthKit and lands them in that org. If you point the invitation link at the app instead, `<APP_URL>/?invitation_token=…` works too.
 
 **Configuration** (in the Worker's environment; for Alchemy deploys, the shell or CI environment running `alchemy deploy`, such as GitHub environment secrets):
@@ -43,6 +43,41 @@ Live mode (`AUTH_MODE=live`, the default outside dev stages) signs people in wit
 If any of these is missing in live mode, nothing falls back to dev: the sign-in screen and `/api/auth/*` say exactly what's missing, and the API refuses requests without a valid ticket or token. Serve live mode over HTTPS: the session cookie is `Secure` everywhere except plain http to localhost. On celld, set the same names in `wrangler.jsonc` (`vars`) and as secrets.
 
 The tests run live mode without WorkOS: `tests/src/live-harness.ts` starts the built server in Miniflare against a fake WorkOS (`tests/src/fake-workos.ts`).
+
+## Billing (Cloud)
+
+Standard Artifacts Cloud bills with [Stripe](https://stripe.com). The rules live in `apps/app/src/worker/plans.ts`, the Stripe calls in `stripe.ts` and the service in `billing.ts`; [Architecture](architecture.md#access-model) has the model.
+
+- **Free:** one human edits (the owner), plus unlimited agents and read-only share links.
+- **Team:** $10 per seat a month billed annually, $12 monthly. A seat is an Owner or an Editor; viewers, agents and access tokens are free.
+- **Trial:** 14 days of Team with no card, once per workspace. Without a card by the end, the subscription pauses: Free limits apply (Editors read only) and nothing is deleted.
+
+**Billing is off unless all four Stripe settings are set**, along with sign-in. With none of them (Solo, `stdartifacts serve`, dev, self-hosting), nothing changes: plans come from the `plan` metadata key, nothing is gated, and Settings has no Billing section. With only some of them, billing stays off and the Worker logs what's missing.
+
+| Variable | |
+| --- | --- |
+| `STRIPE_SECRET_KEY` | Secret. `sk_…` (or a restricted `rk_…` with write access to Customers, Subscriptions, Checkout Sessions and Customer portal). |
+| `STRIPE_WEBHOOK_SECRET` | Secret. The webhook endpoint's signing secret, `whsec_…`. |
+| `STRIPE_PRICE_MONTHLY` | The Team monthly price id, per seat. |
+| `STRIPE_PRICE_ANNUAL` | The Team annual price id, per seat. |
+
+**Setting up Stripe.** `scripts/stripe-setup.mjs` makes everything, and running it again finds what's there:
+
+```sh
+STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-setup.mjs --app-url https://staging.standardartifacts.com --out stripe-staging.env
+```
+
+It creates the "Standard Artifacts Team" product, its two prices by lookup key (`sa_team_monthly`, `sa_team_annual`), a customer portal configuration (switch between monthly and annual, change seats, cancel, update the payment method, see invoices), and a webhook endpoint at `<app-url>/api/billing/webhook`. The price ids and the signing secret go to the `--out` file (mode 600), or to stdout with `--print-secrets`. It refuses a live key unless you pass `--live`. Stripe shows a webhook's signing secret only once, so a second run doesn't have it: `--rotate-webhook` recreates the endpoint and hands over a new one. Delete the `.env` file once its values are in the GitHub environment.
+
+**How it works.**
+
+- *Checkout and the portal.* Owners start Team from Settings → Billing: Stripe Checkout in subscription mode, for as many seats as there are Owners and Editors. The first time it comes with the trial and asks for no card. After that, Manage billing opens Stripe's customer portal.
+- *The webhook* (`POST /api/billing/webhook`) checks Stripe's signature (HMAC-SHA256 with Web Crypto, five minutes' tolerance, any of several `v1` signatures). It then lists the customer's subscriptions afresh and mirrors the current one into the WorkOS organization's metadata (`plan`, `seats`, `billingStatus`, `billingInterval`, `trialEndsAt`, `stripeCustomerId`, `stripeSubscriptionId`) and into the org's WorkspaceCell. Writing current state rather than the event's change makes retries and out-of-order events harmless. If anything fails after the signature checks out, it answers 500 and Stripe retries.
+- *Fresh plans.* Tickets, access tokens, hosted runs and share links read the plan from the WorkspaceCell, so an upgrade or a lapse shows on the next ticket without signing in again.
+- *Seats.* Inviting, promoting or removing an Owner or Editor, and someone accepting an invitation, updates the subscription's quantity, prorated. A pending invitation isn't a seat yet.
+- *Enforcement.* On Free, and while Team is past due or paused, inviting or promoting an Editor or Owner answers `UpgradeRequired` (402), which the app shows as an upgrade prompt. Editors' tickets and tokens act as viewer until it's fixed. Owners keep editing, so they can fix it.
+
+**Testing.** Unit and live tests use a fake Stripe (`tests/src/fake-stripe.ts`), with no keys: `cd tests && node --test src/billing*.test.ts src/stripe-setup.test.ts` (after `pnpm --filter @standard-artifacts/server build`). To try the real thing on staging, run the setup script with a test-mode key, set the four values in the `staging` environment, deploy, and check out with Stripe's test card `4242 4242 4242 4242`. `stripe listen --forward-to localhost:<port>/api/billing/webhook` forwards test events to a local live-mode server.
 
 ## Tests
 
@@ -123,6 +158,8 @@ Give each environment its own values. Never reuse `TICKET_SECRET` or `WORKOS_COO
 | `WORKOS_COOKIE_PASSWORD` | for sign-in | encrypts the session cookie, 32 characters or more: `openssl rand -base64 48` |
 | `ANTHROPIC_API_KEY` | for hosted runs | without it, `@claude` mentions wait for a `stdartifacts agent serve` |
 | `TURBOPUFFER_API_KEY`, `TURBOPUFFER_URL` | optional | content search; without them search matches titles |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | for billing | test-mode keys on staging, live ones on production; see [Billing](#billing-cloud). Without all four Stripe values, billing is off |
+| `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_ANNUAL` | for billing | the price ids `scripts/stripe-setup.mjs` writes |
 
 The workflow sets `APP_URL` itself, to the stage's URL. The deploy job is the only one that sees these secrets. The workflow never runs on pull requests, deploys only from `main` in this repository, and doesn't run in forks.
 
