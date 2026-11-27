@@ -311,6 +311,23 @@ export async function startFakeWorkOS(): Promise<FakeWorkOS> {
       const o = orgs.get(m[1]!)
       return o ? send(res, 200, { object: "organization", ...o }) : notFound(res)
     }
+    if ((m = path.match(/^\/organizations\/([\w-]+)$/)) && req.method === "PUT") {
+      const o = orgs.get(m[1]!)
+      if (!o) return notFound(res)
+      if (typeof body.name === "string") o.name = body.name
+      // Like WorkOS: metadata updates are partial, null deletes a key, and an org holds at most 10 keys of ASCII strings.
+      if (body.metadata && typeof body.metadata === "object") {
+        const next = { ...o.metadata }
+        for (const [k, v] of Object.entries(body.metadata as Record<string, unknown>)) {
+          if (v === null) delete next[k]
+          else if (typeof v !== "string" || k.length > 40 || v.length > 600 || !/^[\x00-\x7f]*$/.test(k + v)) return bad(res, "invalid_metadata", `Bad metadata ${k}`)
+          else next[k] = v
+        }
+        if (Object.keys(next).length > 10) return bad(res, "invalid_metadata", "At most 10 metadata keys")
+        o.metadata = next
+      }
+      return send(res, 200, { object: "organization", ...o })
+    }
 
     const toMembership = (x: Membership) => ({
       object: "organization_membership",
