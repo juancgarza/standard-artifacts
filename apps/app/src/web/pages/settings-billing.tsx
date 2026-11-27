@@ -111,6 +111,24 @@ export function Billing({ principal }: { principal: Principal }) {
             <Row label="Plan" help={standing(info)}>
               <span className="text-text">{info.plan === "team" ? (info.status === "trialing" ? "Team (trial)" : "Team") : "Free"}</span>
             </Row>
+            {info.hostedRuns && (
+              <Row
+                label="Hosted @claude runs"
+                help={
+                  info.hostedRuns.available
+                    ? info.status === "trialing"
+                      ? `The trial includes ${info.hostedRuns.trialLimit} hosted runs. Your own agent (stdartifacts agent serve) can always answer too.`
+                      : "Mentions of @claude run on our servers. Your own agent (stdartifacts agent serve) can answer them too."
+                    : info.hostedRuns.reason === "trial-limit"
+                      ? `The trial's ${info.hostedRuns.trialLimit} hosted runs are used up. Add a payment method to keep them, or run your own agent: stdartifacts agent serve.`
+                      : "Hosted runs are part of Team. Mentions still wait for your own agent: stdartifacts agent serve."
+                }
+              >
+                <span className="text-text">
+                  {info.status === "trialing" ? `${info.hostedRuns.trialUsed} of ${info.hostedRuns.trialLimit} used` : info.hostedRuns.available ? "Included" : "Not included"}
+                </span>
+              </Row>
+            )}
             <Row label="Seats" help="Owners and Editors in the workspace now. The subscription follows them, prorated.">
               <span className="text-text">
                 {info.paidMembers}

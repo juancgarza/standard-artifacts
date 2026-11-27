@@ -343,7 +343,22 @@ export function ThreadCard({
               <div className="flex items-center gap-1 text-[11px] font-medium text-accent">
                 <SparkleIcon size={10} weight="fill" /> Claude
               </div>
-              {isActive(m) ? (
+              {m.status === "queued" && m.unhosted ? (
+                // Billing: the hosted runner won't take it. It stays filed for the person's own agent.
+                <div data-unhosted={m.unhosted.reason} className="space-y-1 py-0.5 text-[13px] text-muted">
+                  <p>{m.unhosted.message}</p>
+                  <div className="flex items-center gap-2">
+                    <a href="/settings/billing" className="font-medium text-accent hover:underline">
+                      See plans
+                    </a>
+                    {!readOnly && (
+                      <button type="button" onClick={() => onStop(m)} className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] hover:bg-hover hover:text-text">
+                        <StopIcon size={11} weight="fill" /> Stop
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : isActive(m) ? (
                 <div className="flex items-center gap-2 py-0.5 text-[13px] text-muted">
                   <CircleNotchIcon size={13} className={m.status === "running" ? "animate-spin" : "opacity-50"} />
                   <span className="flex-1">{m.status === "queued" ? "Waiting for a runner…" : (agentStatus ?? "Working…")}</span>

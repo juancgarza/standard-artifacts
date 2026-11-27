@@ -124,7 +124,15 @@ export function MentionBar({
           )}
         </div>
       )}
-      {state === "working" && late && (
+      {state === "working" && mention?.status === "queued" && mention.unhosted ? (
+        // Billing: the hosted runner won't take it. Said right away, not after the runner hint's wait.
+        <div data-unhosted={mention.unhosted.reason} className="mt-1.5 text-[12px] text-muted">
+          {mention.unhosted.message}.{" "}
+          <a href="/settings/billing" className="font-medium text-accent hover:underline">
+            See plans
+          </a>
+        </div>
+      ) : state === "working" && late && (
         <div data-queued-hint className="mt-1.5 text-[12px] text-muted">
           Waiting for an agent runner. Start one with <code className="rounded bg-surface px-1 font-mono text-[11px]">stdartifacts agent serve</code>.
         </div>
