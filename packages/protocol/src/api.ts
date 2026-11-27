@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint as E, HttpApiGroup, HttpApiMiddleware } from "effect/http-api"
-import { ApiToken, CreateApiToken, CreatedApiToken, InviteMember, OrgInvitation, OrgMember, OrgMembers, UpdateMember } from "./account.ts"
+import { ApiToken, BillingInfo, BillingRedirect, CreateApiToken, CreatedApiToken, InviteMember, OrgInvitation, OrgMember, OrgMembers, StartCheckout, UpdateMember } from "./account.ts"
 import { BoardState } from "./board.ts"
 import { Artifact, ArtifactAccess, CreateArtifact, CreateFolder, CurrentPrincipal, Folder, Id, MoveArtifact, OrgDirectory, ShareLink, UpdateArtifact, UpdateFolder, WorkspaceSnapshot } from "./core.ts"
 import { DocState } from "./doc.ts"
@@ -22,6 +22,11 @@ export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", { messa
 /** The account service (sign-in, members) didn't answer, or this server has none. */
 export class Unavailable extends Schema.TaggedError<Unavailable>()("Unavailable", { message: Schema.String }, { httpApiStatus: 503 }) {}
 export class Invalid extends Schema.TaggedError<Invalid>()("Invalid", { message: Schema.String }, { httpApiStatus: 400 }) {}
+/**
+ * The workspace's plan doesn't cover this (adding an Editor or Owner on Free,
+ * or while billing is past due or paused). The app shows an upgrade prompt.
+ */
+export class UpgradeRequired extends Schema.TaggedError<UpgradeRequired>()("UpgradeRequired", { message: Schema.String }, { httpApiStatus: 402 }) {}
 
 export const ApiErrors = [Forbidden, NotFound, Invalid]
 export type ApiError = Forbidden | NotFound | Invalid
@@ -125,6 +130,7 @@ export const SearchGroup = HttpApiGroup.make("search")
   .middleware(Authentication)
 
 const AccountErrors = [...ApiErrors, Unavailable]
+const MemberErrors = [...AccountErrors, UpgradeRequired]
 
 /**
  * The org's members, roles and invitations, from the account service (WorkOS in
@@ -134,10 +140,11 @@ const AccountErrors = [...ApiErrors, Unavailable]
 export const OrgGroup = HttpApiGroup.make("org")
   .add(
     E.get("members", "/org/members", { success: OrgMembers, error: AccountErrors }),
-    E.post("invite", "/org/invitations", { payload: InviteMember, success: OrgInvitation, error: AccountErrors }),
+    /** On Free, inviting an Editor or Owner answers UpgradeRequired. Viewers are always free. */
+    E.post("invite", "/org/invitations", { payload: InviteMember, success: OrgInvitation, error: MemberErrors }),
     E.post("resendInvitation", "/org/invitations/:id/resend", { params, success: OrgInvitation, error: AccountErrors }),
     E.delete("revokeInvitation", "/org/invitations/:id", { params, error: AccountErrors }),
-    E.patch("updateMember", "/org/members/:id", { params, payload: UpdateMember, success: OrgMember, error: AccountErrors }),
+    E.patch("updateMember", "/org/members/:id", { params, payload: UpdateMember, success: OrgMember, error: MemberErrors }),
     /** The last owner can't be removed (or demoted): make someone else an owner first. */
     E.delete("removeMember", "/org/members/:id", { params, error: AccountErrors }),
   )
@@ -154,6 +161,22 @@ export const TokensGroup = HttpApiGroup.make("tokens")
   .middleware(ValidationErrors)
   .middleware(Authentication)
 
+/**
+ * The org's plan and its Team subscription on Stripe. Everyone in the org can
+ * read it; owners start Checkout and open the customer portal. On a server
+ * without Stripe, `info` says billing is off and the rest answer Unavailable.
+ * Stripe's webhook (POST /api/billing/webhook) sits outside the HttpApi: it
+ * needs the raw body to check the signature.
+ */
+export const BillingGroup = HttpApiGroup.make("billing")
+  .add(
+    E.get("info", "/billing", { success: BillingInfo, error: AccountErrors }),
+    E.post("checkout", "/billing/checkout", { payload: StartCheckout, success: BillingRedirect, error: AccountErrors }),
+    E.post("portal", "/billing/portal", { success: BillingRedirect, error: AccountErrors }),
+  )
+  .middleware(ValidationErrors)
+  .middleware(Authentication)
+
 export const Api = HttpApi.make("StandardArtifacts")
   .add(WorkspaceGroup)
   .add(RoomsGroup)
@@ -162,4 +185,5 @@ export const Api = HttpApi.make("StandardArtifacts")
   .add(SearchGroup)
   .add(OrgGroup)
   .add(TokensGroup)
+  .add(BillingGroup)
   .prefix("/api/v1")

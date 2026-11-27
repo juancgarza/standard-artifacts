@@ -212,6 +212,12 @@ export function makeWorkOS(options: WorkOSOptions) {
     getUser: (id: string) => call("GET", `/user_management/users/${encodeURIComponent(id)}`, WorkOSUser),
     getOrganization: (id: string) => call("GET", `/organizations/${encodeURIComponent(id)}`, Organization),
     createOrganization: (name: string) => call("POST", "/organizations", Organization, { body: { name } }),
+    /**
+     * Set some of an org's metadata keys. WorkOS updates metadata partially: keys left out stay as they are,
+     * and a null value deletes its key. At most 10 keys per org, values ASCII strings up to 600 characters.
+     */
+    updateOrganizationMetadata: (id: string, metadata: Readonly<Record<string, string | null>>) =>
+      call("PUT", `/organizations/${encodeURIComponent(id)}`, Organization, { body: { metadata } }),
     /** The roles an org can hand out (environment roles plus its own). */
     listRoles: (organizationId: string) =>
       Effect.map(call("GET", `/organizations/${encodeURIComponent(organizationId)}/roles`, Roles), (r) => r.data.map((x) => x.slug)),

@@ -97,8 +97,9 @@ export const authRoute = (request: Request) =>
           ticket: minted.ticket,
           expiresAt: minted.expiresAt,
           user: { id: minted.principal.actor.id, name: session.user.name, email: session.user.email, avatarUrl: session.user.avatarUrl },
-          org: session.org,
-          role: session.role,
+          // The ticket's plan and role: live from billing, and read-only for an Editor on Free limits.
+          org: { ...session.org, plan: minted.principal.plan },
+          role: minted.principal.role,
         }
         return json(body, 200, set)
       })

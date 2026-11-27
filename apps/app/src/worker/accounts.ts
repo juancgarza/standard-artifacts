@@ -4,6 +4,7 @@ import {
   Invalid,
   NotFound,
   Unavailable,
+  UpgradeRequired,
   type InvitationState,
   type InviteMember,
   type OrgInvitation,
@@ -22,6 +23,7 @@ import {
   displayName,
   isSession,
   isSignInState,
+  membershipRole,
   randomState,
   roleFromSlugs,
   safeReturnTo,
@@ -34,7 +36,9 @@ import {
   workspaceName,
   type Session,
 } from "./session"
+import { Billing } from "./billing"
 import { Bindings } from "./env"
+import { planOf } from "./plans"
 import { signTicket } from "./tickets"
 import { makeWorkOS, orgSelection, type Authenticated, type Invitation, type Membership, type WorkOSClient, type WorkOSError, type WorkOSUser } from "./workos"
 
@@ -54,6 +58,10 @@ import { makeWorkOS, orgSelection, type Authenticated, type Invitation, type Mem
  *   no org gets one ("Ada's workspace") with an owner membership.
  * - Roles. WorkOS role slugs owner, editor and viewer map to ours; admin and
  *   member (WorkOS's defaults) map to owner and editor (see session.ts).
+ * - Plans. Tickets carry the org's plan as billing last set it, and on Free
+ *   limits an Editor's ticket says viewer. Adding an Editor or Owner on Free
+ *   answers UpgradeRequired, and member changes keep Team's seats in step
+ *   (see billing.ts; all no-ops when billing is off).
  *
  * In dev mode, or live mode without the config, none of this runs: `problem`
  * says why, and live mode never falls back to dev.
@@ -66,6 +74,8 @@ export class SignInError extends Schema.TaggedError<SignInError>()("SignInError"
 }) {}
 
 export type AccountError = Forbidden | NotFound | Invalid | Unavailable
+/** Member changes that add a seat can also need an upgrade first. */
+export type MemberError = AccountError | UpgradeRequired
 
 export interface SignInStart {
   /** Where to send the browser (AuthKit). */
@@ -102,10 +112,10 @@ export class Accounts extends Context.Service<
     readonly signOutUrl: (request: Request, session: Session | undefined) => string
 
     readonly members: (p: Principal) => Effect.Effect<OrgMembers, AccountError>
-    readonly invite: (p: Principal, input: InviteMember) => Effect.Effect<OrgInvitation, AccountError>
+    readonly invite: (p: Principal, input: InviteMember) => Effect.Effect<OrgInvitation, MemberError>
     readonly resendInvitation: (p: Principal, id: string) => Effect.Effect<OrgInvitation, AccountError>
     readonly revokeInvitation: (p: Principal, id: string) => Effect.Effect<void, AccountError>
-    readonly updateMember: (p: Principal, id: string, role: Role) => Effect.Effect<OrgMember, AccountError>
+    readonly updateMember: (p: Principal, id: string, role: Role) => Effect.Effect<OrgMember, MemberError>
     /** Removes the membership and returns the person's actor id, so their tokens can go too. */
     readonly removeMember: (p: Principal, id: string) => Effect.Effect<string, AccountError>
     /** A person's role in an org right now, or null if they aren't a member. Undefined when there are no accounts (dev). */
@@ -118,6 +128,7 @@ export class Accounts extends Context.Service<
       const text = (name: string) => Config.String(name).pipe(Config.withDefault(""))
       const secret = (name: string) => Config.Redacted(name).pipe(Config.withDefault(Redacted.make("")))
       const env = yield* Bindings
+      const billing = yield* Billing
       const mode = (yield* Config.String("AUTH_MODE").pipe(Config.withDefault("live"))) === "dev" ? "dev" : "live"
       const ticketSecret = Redacted.value(yield* secret("TICKET_SECRET"))
       const apiKey = yield* secret("WORKOS_API_KEY")
@@ -183,7 +194,7 @@ export class Accounts extends Context.Service<
         { capacity: 1000, timeToLive: (exit) => (Exit.isSuccess(exit) && exit.value ? Duration.minutes(5) : Duration.zero) },
       )
 
-      const roleOf = (m: Membership): Role => roleFromSlugs(m.roles?.length ? m.roles.map((r) => r.slug) : [m.role?.slug])
+      const roleOf = (m: Membership): Role => membershipRole(m)
 
       // --- Sessions ------------------------------------------------------------------------------
 
@@ -267,7 +278,10 @@ export class Accounts extends Context.Service<
           const orgId = yield* landingOrg(auth.user, input.lastOrg)
           auth = yield* wos.refresh(auth.refresh_token, orgId).pipe(Effect.mapError(signInFailed))
         }
-        return { session: yield* toSession(auth), returnTo: started.returnTo }
+        const session = yield* toSession(auth)
+        // Someone who just accepted an invitation joins here, and on Team that's a seat.
+        yield* billing.syncSeats(session.org.id)
+        return { session, returnTo: started.returnTo }
       })
 
       const readSession: Accounts["Service"]["readSession"] = (cookie) =>
@@ -285,11 +299,13 @@ export class Accounts extends Context.Service<
 
       const mint: Accounts["Service"]["mint"] = Effect.fn("Accounts.mint")(function* (session) {
         yield* client
+        // The plan as billing last set it, so an upgrade (or a lapse) shows on the next ticket, without signing in again.
+        const plan = yield* billing.livePlan(session.org.id, session.org.plan)
         const principal: Principal = {
           orgId: session.org.id,
           orgName: session.org.name,
-          plan: session.org.plan,
-          role: session.role,
+          plan,
+          role: billing.effectiveRole(session.role, plan),
           actor: { type: "user", id: userActorId(session.user.id), name: session.user.name },
         }
         const now = Date.now()
@@ -330,7 +346,7 @@ export class Accounts extends Context.Service<
         if (owned.length >= MAX_OWNED_ORGS) {
           return yield* new SignInError({ reason: "forbidden", message: `You already own ${MAX_OWNED_ORGS} workspaces, the most one person can own for now.` })
         }
-        // TODO(Cloud tracker #4, billing and seats): a new workspace starts on the free plan.
+        // A new workspace starts on Free; an owner can start Team's trial in Settings → Billing.
         const orgId = yield* createWorkspace(session.user.id, clean)
         return yield* switchOrg(session, orgId)
       })
@@ -475,7 +491,9 @@ export class Accounts extends Context.Service<
         yield* requireOwner(p)
         const w = yield* api
         const roleSlug = yield* slugFor(p.orgId, input.role)
-        // TODO(Cloud tracker #4, billing and seats): enforce seat limits by plan here. Invites aren't blocked on the plan yet.
+        // On Free limits an Editor or Owner needs Team first: the app shows an upgrade prompt. Viewers are free.
+        // On Team, an invitation isn't a seat yet: it becomes one when it's accepted (see finishSignIn).
+        yield* billing.requireSeat(p.orgId, input.role)
         const sent = yield* w
           .sendInvitation({ email: input.email.toLowerCase(), organizationId: p.orgId, roleSlug, inviterUserId: workosUserId(p.actor.id) })
           .pipe(Effect.mapError(toApi))
@@ -512,11 +530,14 @@ export class Accounts extends Context.Service<
             const m = yield* ownMembership(p, id)
             const demoting = roleOf(m) === "owner" && role !== "owner"
             if (demoting && (yield* owners(p.orgId)) <= 1) return yield* lastOwner(m, p)
+            // A viewer becoming an Editor or Owner takes a seat.
+            if (roleOf(m) === "viewer") yield* billing.requireSeat(p.orgId, role)
             const w = yield* api
             const updated = yield* w.updateMembership(id, yield* slugFor(p.orgId, role)).pipe(Effect.mapError(toApi))
             if (demoting) {
               yield* keepAnOwner(p.orgId, w.updateMembership(id, yield* slugFor(p.orgId, "owner")).pipe(Effect.mapError(toApi)))
             }
+            yield* billing.syncSeats(p.orgId)
             return yield* toMember({ ...updated, user: updated.user ?? m.user ?? null })
           }),
         ).pipe(Effect.withSpan("Accounts.updateMember"))
@@ -535,6 +556,7 @@ export class Accounts extends Context.Service<
               const slug = yield* slugFor(p.orgId, "owner")
               yield* keepAnOwner(p.orgId, w.createMembership({ userId: m.user_id, organizationId: p.orgId, roleSlug: slug }).pipe(Effect.mapError(toApi)))
             }
+            yield* billing.syncSeats(p.orgId)
             return userActorId(m.user_id)
           }),
         ).pipe(Effect.withSpan("Accounts.removeMember"))
@@ -564,13 +586,6 @@ export class Accounts extends Context.Service<
     }),
   )
 }
-
-/**
- * The org's plan, from WorkOS organization metadata `plan` ("free" or "team").
- * TODO(Cloud tracker #4, billing and seats): billing sets it. Until then every org is on free, and nothing is
- * enforced by plan here.
- */
-const planOf = (metadata: Readonly<Record<string, unknown>> | null | undefined): Session["org"]["plan"] => (metadata?.plan === "team" ? "team" : "free")
 
 /** The most workspaces one person can own through "New workspace" (a stopgap until real quotas, Cloud tracker #7). */
 export const MAX_OWNED_ORGS = 10

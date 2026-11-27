@@ -351,11 +351,39 @@ export class WorkspaceCell extends DurableObject<Env> {
     }
   }
 
+  /** The org's details, with its plan as billing last said (see `setBilling`), else as the last ticket said. */
   private org(): { orgId: string; orgName: string; plan: Principal["plan"] } | null {
     const exists = this.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'org_meta'").toArray().length > 0
     if (!exists) return null
     const row = this.sql.exec<{ org_id: string; org_name: string; plan: Principal["plan"] }>("SELECT org_id, org_name, plan FROM org_meta").toArray()[0]
-    return row ? { orgId: row.org_id, orgName: row.org_name, plan: row.plan } : null
+    return row ? { orgId: row.org_id, orgName: row.org_name, plan: this.billing()?.plan ?? row.plan } : null
+  }
+
+  // --- Billing ----------------------------------------------------------------------------
+
+  /**
+   * The plan as Stripe's webhook last set it, so an upgrade or a lapse reaches
+   * tickets, access tokens, hosted runs and share links without anyone
+   * signing in again. Tickets can't overwrite it (they may be minutes old):
+   * only `setBilling` writes here, and an older write never replaces a newer one.
+   * No row (billing off, or never subscribed): the plan comes from tickets as before.
+   */
+  private billingTable() {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS billing (id INTEGER PRIMARY KEY CHECK (id = 1), plan TEXT NOT NULL, status TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+  }
+
+  setBilling(plan: Principal["plan"], status: string, at: number): void {
+    this.billingTable()
+    this.sql.exec(
+      "INSERT INTO billing (id, plan, status, updated_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET plan = excluded.plan, status = excluded.status, updated_at = excluded.updated_at WHERE excluded.updated_at >= billing.updated_at",
+      plan, status, at,
+    )
+  }
+
+  billing(): { plan: Principal["plan"]; status: string } | null {
+    this.billingTable()
+    const row = this.sql.exec<{ plan: Principal["plan"]; status: string }>("SELECT plan, status FROM billing").toArray()[0]
+    return row ? { plan: row.plan === "team" ? "team" : "free", status: row.status } : null
   }
 
   /** Lease the oldest ready mention to a runner. Expired leases are reclaimed; three attempts, then it fails. */
@@ -756,12 +784,15 @@ export class WorkspaceCell extends DurableObject<Env> {
     this.sql.exec("UPDATE api_tokens SET role = ?, checked_at = ? WHERE user_id = ?", role, Date.now(), userId)
   }
 
-  /** Resolve a share token (for the Worker's auth). Null when it was turned off or its artifact is gone. */
+  /**
+   * Resolve a share token (for the Worker's auth). Null when it was turned off or its artifact is gone.
+   * The plan is the org's now, not when the link was made (the row's `plan` is only a fallback).
+   */
   link(token: string): { artifactId: string; kind: Artifact["kind"]; orgName: string; plan: Principal["plan"] } | null {
     this.sharing()
     const row = this.sql.exec<LinkRow>("SELECT * FROM share_links WHERE token = ?", token).toArray()[0]
     const artifact = row && this.get(row.artifact_id)
-    return row && artifact ? { artifactId: artifact.id, kind: artifact.kind, orgName: row.org_name, plan: row.plan } : null
+    return row && artifact ? { artifactId: artifact.id, kind: artifact.kind, orgName: row.org_name, plan: this.org()?.plan ?? row.plan } : null
   }
 }
 

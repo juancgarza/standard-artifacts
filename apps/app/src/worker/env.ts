@@ -46,6 +46,19 @@ export interface Env {
   readonly APP_URL?: string
   /** Default https://api.workos.com. The tests point it at a fake. */
   readonly WORKOS_API_URL?: string
+  /**
+   * Billing (Standard Artifacts Cloud): Free and Team plans on Stripe. All four, plus sign-in, turn it on;
+   * with none of them, billing is off and every workspace works as it always has (Solo, dev, self-hosting).
+   * See plans.ts and billing.ts.
+   */
+  readonly STRIPE_SECRET_KEY?: string
+  /** The webhook endpoint's signing secret (`whsec_…`), for POST /api/billing/webhook. */
+  readonly STRIPE_WEBHOOK_SECRET?: string
+  /** The Team price ids, per seat: monthly and annual. */
+  readonly STRIPE_PRICE_MONTHLY?: string
+  readonly STRIPE_PRICE_ANNUAL?: string
+  /** Default https://api.stripe.com. The tests point it at a fake. */
+  readonly STRIPE_API_URL?: string
   /** Turns on content search. Without it, nothing is indexed and search matches titles only. */
   readonly TURBOPUFFER_API_KEY?: string
   /** The region's host (default aws-us-east-1). Namespaces live in one region. */

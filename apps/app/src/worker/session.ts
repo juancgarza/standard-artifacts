@@ -75,6 +75,10 @@ export function roleFromSlugs(slugs: ReadonlyArray<string | null | undefined>): 
   return best
 }
 
+/** A WorkOS membership's role: its roles if it has several, else its one role. */
+export const membershipRole = (m: { readonly role?: { readonly slug: string } | null | undefined; readonly roles?: ReadonlyArray<{ readonly slug: string }> | null | undefined }): Role =>
+  roleFromSlugs(m.roles?.length ? m.roles.map((r) => r.slug) : [m.role?.slug])
+
 const slugRoles: Record<string, Role> = { owner: "owner", admin: "owner", editor: "editor", member: "editor", viewer: "viewer" }
 
 /**

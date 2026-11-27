@@ -191,7 +191,7 @@ export type Actor = typeof Actor.Type
 export const Role = Schema.Literals(["viewer", "editor", "owner"])
 export type Role = typeof Role.Type
 
-/** free = one human seat (plus agents, plus read-only guest links); team = multiplayer. */
+/** free = one human who edits (plus agents, plus read-only guest links); team = multiplayer, billed per Owner and Editor. */
 export const Plan = Schema.Literals(["free", "team"])
 export type Plan = typeof Plan.Type
 
@@ -226,6 +226,8 @@ export const WorkspaceSnapshot = Schema.Struct({
   folders: Schema.Array(Folder),
   /** "dev": a local server with no sign-in (`stdartifacts serve`, `pnpm dev`), where agents connect without a token. */
   authMode: Schema.optionalKey(Schema.Literals(["dev", "live"])),
+  /** True when this server bills (Standard Artifacts Cloud): Settings shows Billing. */
+  billing: Schema.optionalKey(Schema.Boolean),
 })
 export interface WorkspaceSnapshot extends Schema.Schema.Type<typeof WorkspaceSnapshot> {}
 

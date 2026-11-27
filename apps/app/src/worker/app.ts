@@ -5,9 +5,11 @@ import { Api, kinds, type Principal } from "@standard-artifacts/protocol"
 import { Accounts } from "./accounts"
 import { Auth, GUEST_COOKIE, SHARE_COOKIE, credentialsFromRequest, readCookie } from "./auth"
 import { authRoute, isAuthPath } from "./auth-routes"
+import { Billing } from "./billing"
 import { Bindings, type Env } from "./env"
 import {
   AuthenticationLive,
+  BillingHandlers,
   MentionsHandlers,
   OrgHandlers,
   RoomsHandlers,
@@ -30,6 +32,7 @@ import { mcpCellName } from "./cells/mcp-cell"
  *   /api/v1/share/:token  open a share link: sets a cookie, redirects to the artifact
  *   /api/v1/share/exit    drop the share cookie (dev: back to the local owner)
  *   /api/auth/*         browser sign-in with WorkOS (live mode): see auth-routes.ts
+ *   /api/billing/webhook  Stripe's signed events (Cloud): see billing.ts
  *   /api/v1/*           the HttpApi contract in @standard-artifacts/protocol
  */
 
@@ -38,6 +41,7 @@ const services = (env: Env) =>
   Layer.mergeAll(Auth.layer, Rooms.layer, Search.layer).pipe(
     Layer.provideMerge(Workspaces.layer),
     Layer.provideMerge(Accounts.layer),
+    Layer.provideMerge(Billing.layer),
     Layer.provide(Layer.succeed(Bindings, env)),
     Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
   )
@@ -47,7 +51,7 @@ const build = (env: Env) => {
   const runtime = ManagedRuntime.make(layer)
   const api = HttpRouter.toWebHandler(
     HttpApiBuilder.layer(Api).pipe(
-      Layer.provide([WorkspaceHandlers, RoomsHandlers, MentionsHandlers, SharingHandlers, SearchHandlers, OrgHandlers, TokensHandlers]),
+      Layer.provide([WorkspaceHandlers, RoomsHandlers, MentionsHandlers, SharingHandlers, SearchHandlers, OrgHandlers, TokensHandlers, BillingHandlers]),
       Layer.provide([AuthenticationLive, ValidationErrorsLive]),
       Layer.provide(layer),
       Layer.provide(HttpServer.layerServices),
@@ -69,6 +73,11 @@ export function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
   if (url.pathname === "/mcp") return app.runtime.runPromise(routeMcp(request, env))
   if (isAuthPath(url.pathname)) return app.runtime.runPromise(authRoute(request))
+  if (url.pathname === "/api/billing/webhook" && request.method === "POST") {
+    return app.runtime.runPromise(Effect.gen(function* () {
+      return yield* (yield* Billing).webhook(request)
+    }))
+  }
   const roomId = url.pathname.match(roomPath)?.[1]
   if (roomId && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
     return app.runtime.runPromise(connectRoom(request, roomId))

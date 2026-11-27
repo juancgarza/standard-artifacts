@@ -4,6 +4,7 @@ import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api"
 import { Api, Authentication, CurrentPrincipal, Forbidden, Invalid, ValidationErrors, formatIssue, type Principal } from "@standard-artifacts/protocol"
 import { Accounts } from "./accounts"
 import { Auth, GUEST_COOKIE, SHARE_COOKIE, bearer, fromAccessToken } from "./auth"
+import { Billing } from "./billing"
 import { SESSION_COOKIE, cookieName, userActorId } from "./session"
 import { Rooms, Search, Workspaces } from "./services"
 
@@ -51,13 +52,20 @@ export const WorkspaceHandlers = HttpApiBuilder.group(
   Effect.fn("Http.workspace")(function* (handlers) {
     const workspaces = yield* Workspaces
     const rooms = yield* Rooms
+    const billing = yield* Billing
     const authMode = (yield* Config.String("AUTH_MODE").pipe(Config.withDefault("live"))) === "dev" ? "dev" : "live"
     return handlers.handleAll({
       snapshot: () =>
         Effect.gen(function* () {
           const principal = yield* CurrentPrincipal
           yield* workspaces.touch(principal)
-          return { principal, artifacts: yield* workspaces.list(principal), folders: yield* workspaces.folders(principal), authMode } as const
+          return {
+            principal,
+            artifacts: yield* workspaces.list(principal),
+            folders: yield* workspaces.folders(principal),
+            authMode,
+            ...(billing.enabled && { billing: true }),
+          } as const
         }),
       members: () => Effect.flatMap(CurrentPrincipal, (p) => workspaces.directory(p)),
       createArtifact: ({ payload }) => Effect.flatMap(CurrentPrincipal, (p) => workspaces.create(p, payload)),
@@ -161,6 +169,41 @@ export const OrgHandlers = HttpApiBuilder.group(
           const p = yield* notViaToken(MANAGE_BY_TOKEN)
           const userId = yield* accounts.removeMember(p, params.id)
           yield* workspaces.revokeUserTokens(p, userId)
+        }),
+    })
+  }),
+)
+
+export const BillingHandlers = HttpApiBuilder.group(
+  Api,
+  "billing",
+  Effect.fn("Http.billing")(function* (handlers) {
+    const billing = yield* Billing
+    const accounts = yield* Accounts
+
+    /** Paying is an owner's call, made in the app: the ticket says owner, and WorkOS is asked again. */
+    const owner = Effect.gen(function* () {
+      const p = yield* notViaToken("Manage billing in the app, not with an access token.")
+      const refused = new Forbidden({ message: "Only owners manage billing." })
+      if (p.actor.type !== "user" || p.role !== "owner") return yield* refused
+      if ((yield* accounts.currentRole(p.orgId, p.actor.id)) !== "owner") return yield* refused
+      return p
+    })
+    const origin = Effect.map(HttpServerRequest.HttpServerRequest, (request) => new URL(request.originalUrl).origin)
+    /** APP_URL when it's set (behind a proxy the request's own origin can be wrong), else the request's. */
+    const appOrigin = Effect.map(origin, (o) => accounts.appOrigin(new Request(o)))
+
+    return handlers.handleAll({
+      info: () => Effect.flatMap(CurrentPrincipal, (p) => billing.info(p)),
+      checkout: ({ payload }) =>
+        Effect.gen(function* () {
+          const p = yield* owner
+          return yield* billing.checkout(p, payload.interval, yield* appOrigin)
+        }),
+      portal: () =>
+        Effect.gen(function* () {
+          const p = yield* owner
+          return yield* billing.portal(p, yield* appOrigin)
         }),
     })
   }),

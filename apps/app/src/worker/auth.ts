@@ -1,6 +1,7 @@
 import { Config, Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect"
 import { Ticket, Unauthorized, type ArtifactKind, type Principal } from "@standard-artifacts/protocol"
 import { Accounts } from "./accounts"
+import { Billing } from "./billing"
 import type { ResolvedToken } from "./cells/workspace-cell"
 import { Bindings } from "./env"
 import { TICKET_COOKIE, agentRole, apiTokenOrg, cookieName, hashApiToken } from "./session"
@@ -57,13 +58,15 @@ export class Auth extends Context.Service<
    * keeps a hash and the role; the account service confirms the role every
    * few minutes, and a token of someone who left stops working. With
    * `x-dev-as: agent` (what `stdartifacts mcp` sends) the same token acts as an
-   * agent for that person, never above editor.
+   * agent for that person, never above editor. On Free limits (billing on) an
+   * Editor's token reads only, as their tickets do.
    */
   static readonly layer = Layer.effect(
     Auth,
     Effect.gen(function* () {
       const env = yield* Bindings
       const accounts = yield* Accounts
+      const billing = yield* Billing
       const mode = yield* Config.String("AUTH_MODE").pipe(Config.withDefault("live"))
       // The local owner's display name. `stdartifacts serve` passes the OS user's; Alchemy dev keeps "JC".
       const ownerName = (yield* Config.String("DEV_OWNER_NAME").pipe(Config.withDefault(""))).trim().slice(0, 80) || "JC"
@@ -149,6 +152,8 @@ export class Auth extends Context.Service<
             yield* Effect.promise(async () => void (await cell.tokenRoleChecked(found.userId, role)))
           }
         }
+        // The cell's plan is billing's latest; on Free limits an Editor's token reads, like their tickets.
+        role = billing.effectiveRole(role, found.plan)
         const base = { orgId, orgName: found.orgName, plan: found.plan }
         const slug = found.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "token"
         const principal: Principal =
