@@ -68,6 +68,15 @@ Type `@claude` in a doc, a board note or a table cell, and an agent picks the re
 
 Self-hosting for a team needs sign-in, which isn't built yet. Until then, a self-hosted server is for one person on localhost. See [SECURITY.md](SECURITY.md#dev-mode-solo).
 
+## Desktop app (preview)
+
+A desktop app for Standard Artifacts Cloud, for macOS, Windows and Linux, is in preview: download it from [Releases](https://github.com/juancgarza/standard-artifacts/releases?q=desktop&expanded=true) ("Desktop preview"). It isn't signed yet, so the first time you open it:
+
+- **macOS Sequoia and later:** open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**. Or run `xattr -dr com.apple.quarantine "/Applications/Standard Artifacts.app"`.
+- **Windows:** when SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**.
+
+Sign-in opens in your browser and comes back to the app. See [Desktop app](docs/desktop.md).
+
 ## How it works
 
 ```
