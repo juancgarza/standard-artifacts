@@ -9,7 +9,9 @@ import {
   billingSetup,
   currentSubscription,
   TRIAL_HOSTED_RUNS,
+  WAITING_MENTION_MAX_AGE_MS,
   billingOn,
+  expiredMentionMessage,
   effectiveRole,
   hostedRuns,
   hostedRunsMessage,
@@ -288,6 +290,11 @@ describe("hosted runs", () => {
     assert.deepEqual(on("trialing", TRIAL_HOSTED_RUNS + 3), { allowed: false, reason: "trial-limit" })
     assert.match(hostedRunsMessage("trial-limit"), /trial's 25 hosted runs are used up/)
     assert.match(hostedRunsMessage("plan"), /Hosted runs are part of Team\. Upgrade .*, or run your own agent: stdartifacts agent serve/)
+  })
+
+  test("requests that waited start only within a day; older ones expire with a clear reason", () => {
+    assert.equal(WAITING_MENTION_MAX_AGE_MS, 24 * 60 * 60 * 1000)
+    assert.equal(expiredMentionMessage(), "Expired: this request waited more than 24 hours without an agent taking it. Ask again.")
   })
 
   test("Team set by hand (no billing status) counts as active", () => {

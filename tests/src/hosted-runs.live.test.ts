@@ -1,4 +1,8 @@
 import assert from "node:assert/strict"
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { after, before, describe, test } from "node:test"
 import { FAKE_PRICE_ANNUAL, FAKE_PRICE_MONTHLY, FAKE_STRIPE_KEY, FAKE_WEBHOOK_SECRET, startFakeStripe, type FakeStripe } from "./fake-stripe.ts"
 import { bearer, startLive, Visitor, type LiveApp } from "./live-harness.ts"
@@ -200,5 +204,82 @@ describe("hosted runs with billing on", () => {
     const before = (await (await workspace(app, trial.orgId)).hostedRunsInfo())?.started
     await pause(1500)
     assert.equal((await (await workspace(app, trial.orgId)).hostedRunsInfo())?.started, before)
+  })
+})
+
+describe("upgrading starts only recent waiting requests", () => {
+  const billing = {
+    STRIPE_SECRET_KEY: FAKE_STRIPE_KEY,
+    STRIPE_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
+    STRIPE_PRICE_MONTHLY: FAKE_PRICE_MONTHLY,
+    STRIPE_PRICE_ANNUAL: FAKE_PRICE_ANNUAL,
+  }
+
+  test("a request older than 24 hours expires instead of running; a recent one runs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sa-hosted-"))
+    const stripe = await startFakeStripe()
+    try {
+      // On Free: two requests wait for someone's own agent.
+      const first = await startLive({ ...billing, STRIPE_API_URL: stripe.url }, { runner: true, persist: dir })
+      let orgId: string
+      let orgName: string
+      let old: string
+      let recent: string
+      try {
+        const o = await owner(first, "waited@example.test")
+        orgId = o.orgId
+        orgName = first.fake.orgs.get(orgId)!.name
+        old = (await ask(o.v, o.docId)).body.id
+        recent = (await ask(o.v, o.docId)).body.id
+        assert.equal((await (await workspace(first, orgId)).hostedRunsInfo())?.started, 0)
+      } finally {
+        await first.close()
+      }
+
+      // One of them was filed two days ago (and nobody's agent took it).
+      const sqlite = (d: string): Array<string> =>
+        readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? sqlite(join(d, f)) : f.endsWith(".sqlite") ? [join(d, f)] : []))
+      let aged = 0
+      for (const file of sqlite(dir)) {
+        const db = new DatabaseSync(file)
+        try {
+          if (db.prepare("SELECT name FROM sqlite_master WHERE name = 'mentions'").get()) {
+            aged += Number(db.prepare("UPDATE mentions SET created_at = ? WHERE id = ?").run(new Date(Date.now() - 2 * 86_400_000).toISOString(), old).changes)
+          }
+        } finally {
+          db.close()
+        }
+      }
+      assert.equal(aged, 1)
+
+      // The same workspace upgrades to Team (the account service is a fresh fake: give it the org back).
+      const second = await startLive({ ...billing, STRIPE_API_URL: stripe.url }, { runner: true, persist: dir })
+      try {
+        second.fake.orgs.set(orgId, { id: orgId, name: orgName, metadata: {} })
+        const customer = "cus_upgrader"
+        stripe.customers.set(customer, { id: customer, name: orgName, metadata: { orgId } })
+        const sub = stripe.subscribe(customer, { orgId })
+        assert.equal((await stripe.deliver(second.base, "customer.subscription.created", sub)).status, 200)
+
+        const cell = await workspace(second, orgId)
+        const info = await until(() => cell.hostedRunsInfo(), (i) => (i?.started ?? 0) >= 1)
+        await pause(1000)
+        assert.equal((await cell.hostedRunsInfo())?.started, 1, "only the recent request ran")
+
+        const ns = await second.mf.getDurableObjectNamespace("WORKSPACE")
+        const raw = ns.get(ns.idFromName(orgId)) as unknown as { mention(id: string): Promise<{ status: string; result: string | null } | null> }
+        const expired = await raw.mention(old)
+        assert.equal(expired?.status, "error")
+        assert.match(expired?.result ?? "", /^Expired: this request waited more than 24 hours without an agent taking it\. Ask again\.$/)
+        const ran = await raw.mention(recent)
+        assert.notEqual(ran?.status, "error", "the recent one isn't expired")
+        assert.equal(info?.available, true)
+      } finally {
+        await second.close()
+      }
+    } finally {
+      await stripe.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

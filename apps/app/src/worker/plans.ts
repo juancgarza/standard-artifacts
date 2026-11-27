@@ -224,6 +224,16 @@ export const seatsFor = (roles: ReadonlyArray<Role>) => Math.max(1, roles.filter
 /** Hosted `@claude` runs a workspace gets during its Team trial, in all. After that, Team needs a payment method. */
 export const TRIAL_HOSTED_RUNS = 25
 
+/**
+ * How old a waiting request may be and still start a hosted run when a workspace gets them (an upgrade, a payment
+ * that went through). Older ones expire instead: a months-old @claude shouldn't wake up and edit someone's docs.
+ */
+export const WAITING_MENTION_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+/** What an expired request says. */
+export const expiredMentionMessage = () =>
+  `Expired: this request waited more than ${Math.round(WAITING_MENTION_MAX_AGE_MS / 3_600_000)} hours without an agent taking it. Ask again.`
+
 export type HostedRunsRefusal = "plan" | "trial-limit"
 
 /** Whether the hosted runner may start a run for the org. `trial`: each new run uses up the trial's allowance. */

@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers"
 import type { Env } from "../env"
-import { TRIAL_HOSTED_RUNS, billingOn, hostedRuns, hostedRunsMessage, runnerRole, statusOf, type HostedRuns } from "../plans"
+import { TRIAL_HOSTED_RUNS, WAITING_MENTION_MAX_AGE_MS, billingOn, expiredMentionMessage, hostedRuns, hostedRunsMessage, runnerRole, statusOf, type HostedRuns } from "../plans"
 import { runnerEnabled, type RunOutcome } from "./runner-cell"
 import {
   canEdit,
@@ -298,6 +298,7 @@ export class WorkspaceCell extends DurableObject<Env> {
   private async dispatch(): Promise<number | null> {
     const now = Date.now()
     this.closeHopelessMentions(now)
+    this.expireStaleMentions(now)
     this.sql.exec(
       "UPDATE mentions SET status = 'error', result = 'The agent could not be started', updated_at = ? WHERE status = 'queued' AND dispatches >= 3 AND dispatched_at + ? <= ?",
       new Date().toISOString(), LEASE_MS, now,
@@ -373,6 +374,20 @@ export class WorkspaceCell extends DurableObject<Env> {
 
   /** The org's details, with its plan as billing last said (see `setBilling`), else as the last ticket said. */
   // --- Hosted runs and billing --------------------------------------------------------------
+
+  /**
+   * With billing on, a request can wait a long time for hosted runs (on Free, paused, out of trial runs) while
+   * nobody's own agent takes it. When runs become possible, only the last WAITING_MENTION_MAX_AGE_MS of those
+   * start; older ones fail as expired, so an upgrade never sets off months-old requests. Only unclaimed (queued)
+   * requests: anything an agent has claimed carries on as it would.
+   */
+  private expireStaleMentions(now: number) {
+    if (!billingOn(this.env)) return
+    this.sql.exec(
+      "UPDATE mentions SET status = 'error', result = ?, lease_until = NULL, updated_at = ? WHERE status = 'queued' AND created_at < ?",
+      expiredMentionMessage(), new Date(now).toISOString(), new Date(now - WAITING_MENTION_MAX_AGE_MS).toISOString(),
+    )
+  }
 
   /** Each mention a hosted run was started for, once (retries don't count again), and whether it was during the trial. */
   private hostedRunsTable() {
