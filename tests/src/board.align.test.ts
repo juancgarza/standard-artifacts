@@ -136,6 +136,37 @@ describe("alignment on a live board", () => {
   test("dragging near a neighbour's line snaps onto it and shows the guide; ⌘ places freely", async () => {
     const b = await board("align drag")
     const { page, errors } = await open(browser)
+    // Ops the page has sent that the server hasn't applied (echoed back) or rejected yet.
+    const unconfirmed = new Set<string>()
+    page.on("websocket", (ws) => {
+      // Not every frame is JSON (the room also sends a bare "changed").
+      const message = (f: { payload: string | Buffer }): { type?: string; id?: string; clientOpId?: string } => {
+        try {
+          return JSON.parse(String(f.payload))
+        } catch {
+          return {}
+        }
+      }
+      ws.on("framesent", (f) => {
+        const m = message(f)
+        if (m.type === "op" && m.id) unconfirmed.add(m.id)
+      })
+      ws.on("framereceived", (f) => {
+        const m = message(f)
+        if (m.type === "op" && m.clientOpId) unconfirmed.delete(m.clientOpId)
+        if (m.type === "reject" && m.id) unconfirmed.delete(m.id)
+      })
+    })
+    // A drag writes C's position as it goes and the drop writes the last one, so an early read can
+    // catch a mid-drag position: wait until the server has applied all the page sent and C holds still.
+    const dropped = (below: number) =>
+      eventually(async () => {
+        const s = (await items(b.id)).find((x) => x.id === "s_c")!
+        if (s.y <= below || unconfirmed.size) return false
+        await settle(300)
+        const again = (await items(b.id)).find((x) => x.id === "s_c")!
+        return !unconfirmed.size && again.x === s.x && again.y === s.y && again
+      })
     await page.goto(`${BASE}/boards/${b.id}`)
     await page.locator('[data-shape-id="s_c"]').waitFor()
     await settle(300)
@@ -157,10 +188,7 @@ describe("alignment on a live board", () => {
     assert.ok(line.height >= a.height + c.height, "from the top of A to the bottom of C")
     await page.mouse.up()
     assert.equal(await guides.count(), 0, "guides go when the drag ends")
-    const snapped = await eventually(async () => {
-      const s = (await items(b.id)).find((x) => x.id === "s_c")!
-      return s.y > 300 && s
-    })
+    const snapped = await dropped(300)
     assert.equal(snapped.x, 0, "C's left is exactly A's")
 
     // Held ⌘: the same drag, back to 3 px off, stays where the pointer put it.
@@ -173,10 +201,7 @@ describe("alignment on a live board", () => {
     assert.equal(await guides.count(), 0)
     await page.mouse.up()
     await page.keyboard.up("Meta")
-    const free = await eventually(async () => {
-      const s = (await items(b.id)).find((x) => x.id === "s_c")!
-      return s.y > snapped.y && s
-    })
+    const free = await dropped(snapped.y)
     assert.ok(free.x > 0 && free.x < 8, `placed freely at x=${free.x}`)
     assert.deepEqual(errors, [])
   })
