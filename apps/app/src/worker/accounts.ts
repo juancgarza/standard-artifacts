@@ -94,7 +94,13 @@ export class Accounts extends Context.Service<
     readonly appOrigin: (request: Request) => string
     readonly startSignIn: (
       request: Request,
-      options: { readonly returnTo?: string | null; readonly invitationToken?: string | null; readonly screenHint?: "sign-in" | "sign-up" },
+      options: {
+        readonly returnTo?: string | null
+        readonly invitationToken?: string | null
+        readonly screenHint?: "sign-in" | "sign-up"
+        /** The desktop app's PKCE challenge, carried in the sealed state (see desktop-handoff.ts). */
+        readonly desktop?: string | null
+      },
     ) => Effect.Effect<SignInStart, SignInError>
     readonly finishSignIn: (
       request: Request,
@@ -245,7 +251,8 @@ export class Accounts extends Context.Service<
 
       const startSignIn: Accounts["Service"]["startSignIn"] = Effect.fn("Accounts.startSignIn")(function* (request, options) {
         const { wos, key } = yield* client
-        const state = randomState()
+        // A desktop sign-in's state is `<random>.<challenge>` (desktopState in desktop-handoff.ts).
+        const state = options.desktop ? `${randomState()}.${options.desktop}` : randomState()
         const stateCookie = yield* Effect.promise(() =>
           seal(key, "signin", { state, returnTo: safeReturnTo(options.returnTo, appOrigin(request)), exp: nowS() + STATE_MAX_AGE_S }),
         )

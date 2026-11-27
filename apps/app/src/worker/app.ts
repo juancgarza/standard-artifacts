@@ -72,7 +72,7 @@ export function handle(request: Request, env: Env): Promise<Response> {
   app ??= build(env)
   const url = new URL(request.url)
   if (url.pathname === "/mcp") return app.runtime.runPromise(routeMcp(request, env))
-  if (isAuthPath(url.pathname)) return app.runtime.runPromise(authRoute(request))
+  if (isAuthPath(url.pathname)) return app.runtime.runPromise(authRoute(request, env))
   if (url.pathname === "/api/billing/webhook" && request.method === "POST") {
     return app.runtime.runPromise(Effect.gen(function* () {
       return yield* (yield* Billing).webhook(request)

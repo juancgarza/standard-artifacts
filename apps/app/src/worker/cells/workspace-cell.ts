@@ -823,6 +823,39 @@ export class WorkspaceCell extends DurableObject<Env> {
     this.sql.exec("DELETE FROM member_lock WHERE id = 1 AND holder = ?", holder)
   }
 
+  // --- Desktop sign-in codes ------------------------------------------------------------------
+
+  /**
+   * One-time codes that hand a fresh session to the desktop app (see
+   * desktop-handoff.ts). Kept by hash, with the session sealed as its cookie,
+   * for a minute. Synchronous, so a code can only be taken once.
+   */
+  private desktopCodes() {
+    this.sql.exec(
+      "CREATE TABLE IF NOT EXISTS desktop_codes (hash TEXT PRIMARY KEY, challenge TEXT NOT NULL, sealed TEXT NOT NULL, return_to TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+    )
+  }
+
+  putDesktopCode(hash: string, code: { challenge: string; sealed: string; returnTo: string; expiresAt: number }): void {
+    this.desktopCodes()
+    this.sql.exec("DELETE FROM desktop_codes WHERE expires_at < ?", Math.floor(Date.now() / 1000) - 60)
+    this.sql.exec(
+      "INSERT INTO desktop_codes (hash, challenge, sealed, return_to, expires_at) VALUES (?, ?, ?, ?, ?)",
+      hash, code.challenge, code.sealed, code.returnTo, code.expiresAt,
+    )
+  }
+
+  /** The code's session, removing it: a second take gets null. */
+  takeDesktopCode(hash: string): { challenge: string; sealed: string; returnTo: string; expiresAt: number } | null {
+    this.desktopCodes()
+    const row = this.sql
+      .exec<{ challenge: string; sealed: string; return_to: string; expires_at: number }>("SELECT challenge, sealed, return_to, expires_at FROM desktop_codes WHERE hash = ?", hash)
+      .toArray()[0]
+    if (!row) return null
+    this.sql.exec("DELETE FROM desktop_codes WHERE hash = ?", hash)
+    return { challenge: row.challenge, sealed: row.sealed, returnTo: row.return_to, expiresAt: row.expires_at }
+  }
+
   // --- Personal access tokens ---------------------------------------------------------------
 
   /**
