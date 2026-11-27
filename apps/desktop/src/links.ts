@@ -39,3 +39,63 @@ export function deepLinkHref(url: string): string | null {
 }
 
 export const deepLinkInArgs = (args: ReadonlyArray<string>) => args.find(isDeepLink)
+
+// --- Signing in through the browser (RFC 8252) ---------------------------------------------
+
+/** `stdartifacts://auth/…`: sign-in's way back into the app, never a page. */
+export function isAuthLink(url: string): boolean {
+  try {
+    const link = new URL(url)
+    return link.protocol === `${SCHEME}:` && link.host.toLowerCase() === "auth"
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The one-time code in `stdartifacts://auth/callback?code=…`, the link the
+ * sign-in page in the person's browser hands back, or null if it isn't one.
+ * Handled on its own, never as a page: `deepLinkHref` still refuses /api.
+ */
+export function authCallbackCode(url: string): string | null {
+  try {
+    const link = new URL(url)
+    if (link.protocol !== `${SCHEME}:` || link.host !== "auth" || link.pathname.replace(/\/+$/, "") !== "/callback") return null
+    const code = link.searchParams.get("code")
+    return code && /^[\w.-]{16,512}$/.test(code) ? code : null
+  } catch {
+    return null
+  }
+}
+
+/** The app's own sign-in (`/api/auth/login`), which has to run in the person's browser: Google refuses embedded ones. */
+export function isSignInUrl(url: string, appOrigin: string): boolean {
+  try {
+    const { origin, pathname } = new URL(url)
+    return origin === appOrigin && pathname.replace(/\/+$/, "") === "/api/auth/login"
+  } catch {
+    return false
+  }
+}
+
+/** The same sign-in in the browser, carrying the app's PKCE challenge. Only the parameters the login takes come along. */
+export function browserSignInUrl(url: string, appOrigin: string, challenge: string): string {
+  const from = new URL(url)
+  const to = new URL("/api/auth/login", appOrigin)
+  for (const name of ["return_to", "screen", "invitation_token"]) {
+    const value = from.searchParams.get(name)
+    if (value !== null) to.searchParams.set(name, value)
+  }
+  to.searchParams.set("desktop", challenge)
+  return to.toString()
+}
+
+/** AuthKit's sign-out (WorkOS's `/user_management/sessions/logout`), which the app calls itself instead of opening the browser. */
+export function isSignOutUrl(url: string): boolean {
+  try {
+    const { protocol, pathname } = new URL(url)
+    return protocol === "https:" && pathname === "/user_management/sessions/logout"
+  } catch {
+    return false
+  }
+}

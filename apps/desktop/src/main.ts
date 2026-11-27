@@ -1,18 +1,21 @@
 import { join } from "node:path"
 import { app, BrowserWindow, Menu, nativeTheme, session, shell, type WebContents } from "electron"
 import type { DesktopCommand } from "@standard-artifacts/protocol"
-import { deepLinkHref, deepLinkInArgs, destinationOf, SCHEME } from "./links"
+import { authCallbackCode, deepLinkHref, deepLinkInArgs, destinationOf, isAuthLink, isSignInUrl, SCHEME } from "./links"
 import { installMenu } from "./menu"
 import offlineHtml from "./offline.html"
+import { createSignIn } from "./signin"
 import { loadWindowState, saveWindowState } from "./window-state"
 
 /**
  * A thin host: each window loads the app from its Worker, so cookies, room sockets,
  * share links and "Copy link" behave as they do in a browser and the UI can't drift
  * from the API. The app needs its server to do anything, so bundling the UI wouldn't
- * buy offline use. Only local dev can point it elsewhere.
+ * buy offline use. A packaged build loads the address it was built for
+ * (STDARTIFACTS_DESKTOP_URL at build time, app.standardartifacts.com by
+ * default); only an unpackaged one reads it when it starts.
  */
-const appUrl = new URL((!app.isPackaged && process.env.STDARTIFACTS_DESKTOP_URL) || (app.isPackaged ? "https://app.standardartifacts.com" : "http://localhost:5173"))
+const appUrl = new URL((!app.isPackaged && process.env.STDARTIFACTS_DESKTOP_URL) || (app.isPackaged ? PACKAGED_APP_URL : "http://localhost:5173"))
 const appOrigin = appUrl.origin
 const isMac = process.platform === "darwin"
 const SHOW_WITHIN_MS = 1_000
@@ -28,19 +31,32 @@ if (!app.isPackaged && !app.commandLine.hasSwitch("user-data-dir")) {
 const pageUrl = (href: string) => new URL(href, appOrigin).toString()
 const isAppPage = (contents: WebContents) => destinationOf(contents.getURL(), appOrigin) === "in-app"
 
-/** Links the page doesn't handle itself: in-app ones stay, the rest go to the person's browser. */
+/** Sign-in runs in the person's browser and comes back through a `stdartifacts://auth/callback` link. */
+const signIn = createSignIn({ appOrigin, show: showEverywhere })
+
+/**
+ * Links the page doesn't handle itself: in-app ones stay, the rest go to the person's browser.
+ * Two exceptions: signing in goes to the browser too (with what it needs to come back here),
+ * and AuthKit's sign-out right after the page signed out happens here, in the background.
+ */
 function guardNavigation(contents: WebContents) {
   const guard = (event: { preventDefault(): void }, url: string) => {
+    if (isSignInUrl(url, appOrigin)) {
+      event.preventDefault()
+      return signIn.start(url)
+    }
     const destination = destinationOf(url, appOrigin)
     if (destination === "in-app") return
     event.preventDefault()
+    if (signIn.isSignOut(url)) return void signIn.signOut(url)
     if (destination === "external") void shell.openExternal(url)
   }
   contents.on("will-navigate", guard)
   contents.on("will-redirect", guard)
   // "Open in browser tab" means the browser here too; in-app tabs are the page's job.
   contents.setWindowOpenHandler(({ url }) => {
-    if (destinationOf(url, appOrigin) !== "blocked") void shell.openExternal(url)
+    if (isSignInUrl(url, appOrigin)) signIn.start(url)
+    else if (destinationOf(url, appOrigin) !== "blocked") void shell.openExternal(url)
     return { action: "deny" }
   })
 }
@@ -141,17 +157,42 @@ function sendCommand(window: BrowserWindow, command: DesktopCommand) {
   window.webContents.send("standard-artifacts:command", command)
 }
 
+/** The window in front, brought forward, or undefined when there's none. */
+function frontWindow() {
+  const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  if (!window) return undefined
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+  return window
+}
+
 /** Opens a page in the window in front, without reloading it when the page can take it as a new tab. */
 function openLink(url: string) {
   const href = deepLinkHref(url)
   if (!href) return
-  const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const window = frontWindow()
   if (!window) return openWindow(href)
-  if (window.isMinimized()) window.restore()
-  window.show()
-  window.focus()
   if (isAppPage(window.webContents) && !window.webContents.isLoading()) sendCommand(window, { type: "open", href })
   else void window.loadURL(pageUrl(href))
+}
+
+/** After signing in or out: the window in front goes to `href`, and the others start over where they are. */
+function showEverywhere(href: string) {
+  const front = frontWindow()
+  if (!front) return void openWindow(href)
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window === front) void window.loadURL(pageUrl(href))
+    else window.webContents.reload()
+  }
+}
+
+/** A `stdartifacts://` link: sign-in coming back from the browser, or a page to open. */
+function handleLink(url: string) {
+  if (!isAuthLink(url)) return openLink(url)
+  if (!frontWindow()) openWindow()
+  const code = authCallbackCode(url)
+  if (code) void signIn.finish(code)
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -161,12 +202,12 @@ if (!app.requestSingleInstanceLock()) {
   let launchLink = deepLinkInArgs(process.argv)
   app.on("open-url", (event, url) => {
     event.preventDefault()
-    if (app.isReady()) openLink(url)
+    if (app.isReady()) handleLink(url)
     else launchLink = url
   })
   app.on("second-instance", (_, args) => {
     const link = deepLinkInArgs(args)
-    if (link) return openLink(link)
+    if (link) return handleLink(link)
     const window = BrowserWindow.getAllWindows()[0]
     if (!window) return openWindow()
     if (window.isMinimized()) window.restore()
@@ -183,7 +224,9 @@ if (!app.requestSingleInstanceLock()) {
     // The registered handler for unpackaged builds would be the bare Electron binary.
     if (app.isPackaged) app.setAsDefaultProtocolClient(SCHEME)
     restrictPermissions()
+    signIn.watch()
     installMenu({ newWindow: () => openWindow(), command: sendCommand })
-    openWindow((launchLink && deepLinkHref(launchLink)) ?? "/")
+    // A sign-in link can't finish here: a new process has no verifier for it.
+    openWindow((launchLink && !isAuthLink(launchLink) && deepLinkHref(launchLink)) || "/")
   })
 }
