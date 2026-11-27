@@ -50,6 +50,7 @@ Standard Artifacts Cloud bills with [Stripe](https://stripe.com). The rules live
 
 - **Free:** one human edits (the owner), plus unlimited agents and read-only share links.
 - **Team:** $10 per seat a month billed annually, $12 monthly. A seat is an Owner or an Editor; viewers, agents and access tokens are free.
+- **Hosted `@claude` runs** come with Team. A trial includes 25. Your own agent (`stdartifacts agent serve`) works on every plan.
 - **Trial:** 14 days of Team with no card, once per workspace. Without a card by the end, the subscription pauses: Free limits apply (Editors read only) and nothing is deleted.
 
 **Billing is off unless all four Stripe settings are set**, along with sign-in. With none of them (Solo, `stdartifacts serve`, dev, self-hosting), nothing changes: plans come from the `plan` metadata key, nothing is gated, and Settings has no Billing section. With only some of them, billing stays off and the Worker logs what's missing.
@@ -75,6 +76,7 @@ It creates the "Standard Artifacts Team" product, its two prices by lookup key (
 - *The webhook* (`POST /api/billing/webhook`) checks Stripe's signature (HMAC-SHA256 with Web Crypto, five minutes' tolerance, any of several `v1` signatures). It then lists the customer's subscriptions afresh and mirrors the current one into the WorkOS organization's metadata (`plan`, `seats`, `billingStatus`, `billingInterval`, `trialEndsAt`, `stripeCustomerId`, `stripeSubscriptionId`) and into the org's WorkspaceCell. Writing current state rather than the event's change makes retries and out-of-order events harmless. If anything fails after the signature checks out, it answers 500 and Stripe retries.
 - *Fresh plans.* Tickets, access tokens, hosted runs and share links read the plan from the WorkspaceCell, so an upgrade or a lapse shows on the next ticket without signing in again.
 - *Seats.* Inviting, promoting or removing an Owner or Editor, and someone accepting an invitation, updates the subscription's quantity, prorated. A pending invitation isn't a seat yet.
+- *Hosted @claude runs* are for Team that's active, or trialing, which gets 25 in all. On Free, past due, paused or canceled, a mention is still filed for the person's own agent (`stdartifacts agent serve`), and says why the hosted runner didn't take it. See [Hosted runs](agents.md#hosted-runs).
 - *Enforcement.* On Free, and while Team is past due or paused, inviting or promoting an Editor or Owner answers `UpgradeRequired` (402), which the app shows as an upgrade prompt. Editors' tickets and tokens act as viewer until it's fixed. Owners keep editing, so they can fix it.
 
 **Testing.** Unit and live tests use a fake Stripe (`tests/src/fake-stripe.ts`), with no keys: `cd tests && node --test src/billing*.test.ts src/stripe-setup.test.ts` (after `pnpm --filter @standard-artifacts/server build`). To try the real thing on staging, run the setup script with a test-mode key, set the four values in the `staging` environment, deploy, and check out with Stripe's test card `4242 4242 4242 4242`. `stripe listen --forward-to localhost:<port>/api/billing/webhook` forwards test events to a local live-mode server.

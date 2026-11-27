@@ -41,7 +41,12 @@ The inbox API (`GET /mentions`, `POST /mentions/claim`, `POST /mentions/:id/comp
 
 On a Cloudflare deploy, nobody has to run `stdartifacts agent serve`. When a mention is ready, the workspace cell's alarm starts a container for it (`RunnerCell`), which runs `stdartifacts agent serve --once`, answers and exits. Nothing sits idle, and runs can't see each other. It's on when the stage binds `RUNNER` and sets `ANTHROPIC_API_KEY` and `TICKET_SECRET`; dev stages and celld keep using `stdartifacts agent serve`.
 
-- **No secrets in the container.** It has no internet. Everything it sends goes through a Worker (`RunnerOutbound`, rules in `runner-outbound.ts`), which adds the Anthropic key and a short-lived ticket. The ticket acts for the person who asked, as an editor.
+- **For paying workspaces, with billing on** (Cloud; see [Billing](development.md#billing-cloud)). Hosted runs are for Team workspaces that are active, or trialing. A trial gets 25 hosted runs in all (`TRIAL_HOSTED_RUNS` in `plans.ts`); a retry of a run already counted doesn't count again. Free, past due, paused and canceled workspaces get none.
+  - A mention there is still filed, exactly as before, so the person's own agent (`stdartifacts agent serve`, or MCP) can claim it. The hosted runner doesn't claim it and no container starts.
+  - The mention carries `unhosted` (`plan` or `trial-limit`, and a message), and the app shows it with a link to Settings → Billing.
+  - Both the workspace cell (before it dispatches) and `RunnerCell` (before it starts a container) check this. Upgrading starts the requests that waited.
+  - With billing off, every workspace gets hosted runs, as before.
+- **No secrets in the container.** It has no internet. Everything it sends goes through a Worker (`RunnerOutbound`, rules in `runner-outbound.ts`), which adds the Anthropic key and a short-lived ticket. The ticket acts for the person who asked, with their role under the plan now and never above editor. A request from someone who can now only read doesn't start a run, and fails with a reason.
 - **The web is read-only.** A run can GET public pages, with credentials removed, and those hosts are logged. It can't POST anywhere else. A GET can still carry data in its URL, so this limits a prompt-injected page rather than ruling it out.
 - **Limits.** 3 runs at once per org, with the rest queued. $1 and 30 turns per run, and 9 minutes before a stuck run is stopped. `RUNNER_DAILY_RUNS` per org in 24 hours (default 50), after which requests fail with a reason.
 - **Recovery.** A failed start retries after 30 seconds, and after three tries the request fails with a reason. A run that dies leaves its lease to expire, and then it's retried, up to the usual three attempts.
