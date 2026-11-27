@@ -114,17 +114,19 @@ export function stateFromSubscriptions(
   const sub = currentSubscription(subscriptions)
   if (!sub) return { ...NO_BILLING, customerId }
   const status = statusOf(sub.status)
+  // Over: Free, nothing billed. The customer stays, for the next Checkout and the invoice history.
+  if (status === "canceled" || status === "none") return { ...NO_BILLING, status, customerId }
   const item = sub.items.data.find((i) => i.price.id === prices.monthly || i.price.id === prices.annual) ?? sub.items.data[0]
   const interval: BillingInterval | null =
     item?.price.id === prices.annual ? "year" : item?.price.id === prices.monthly ? "month" : item?.price.recurring?.interval === "year" ? "year" : item?.price.recurring?.interval === "month" ? "month" : null
   return {
     plan: isTeamStatus(status) ? "team" : "free",
     status,
-    seats: status === "canceled" ? 0 : Math.max(0, Math.trunc(item?.quantity ?? 0)),
+    seats: Math.max(0, Math.trunc(item?.quantity ?? 0)),
     interval,
     trialEndsAt: status === "trialing" && sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null,
     customerId,
-    subscriptionId: status === "canceled" ? null : sub.id,
+    subscriptionId: sub.id,
   }
 }
 
