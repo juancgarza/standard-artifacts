@@ -55,7 +55,8 @@ export function ListSkeleton() {
   )
 }
 
-export function Snippet({ label, help, code }: { label: string; help?: string; code: string }) {
+/** A command or value with a copy button. `bare` drops the visible label (it still names the button), for snippets inside steps. */
+export function Snippet({ label, help, code, bare }: { label: string; help?: string; code: string; bare?: boolean }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle")
   const copy = async () => {
     try {
@@ -67,12 +68,14 @@ export function Snippet({ label, help, code }: { label: string; help?: string; c
     setTimeout(() => setState("idle"), 1600)
   }
   return (
-    <div className="py-3">
-      <div className="flex items-baseline gap-2">
-        <span className="font-medium">{label}</span>
-        {help && <span className="min-w-0 text-[13px] text-muted">{help}</span>}
-      </div>
-      <div className="mt-1.5 flex items-start gap-1 rounded-md bg-surface py-1 pr-1 pl-3">
+    <div className={bare ? "pt-2" : "py-3"}>
+      {!bare && (
+        <div className="flex items-baseline gap-2">
+          <span className="font-medium">{label}</span>
+          {help && <span className="min-w-0 text-[13px] text-muted">{help}</span>}
+        </div>
+      )}
+      <div className={`${bare ? "" : "mt-1.5 "}flex items-start gap-1 rounded-md bg-surface py-1 pr-1 pl-3`}>
         <code className="min-w-0 flex-1 overflow-x-auto py-1 font-mono text-[12px] leading-5 whitespace-pre">{code}</code>
         <button
           type="button"

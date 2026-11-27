@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { Heading, ListSkeleton, Row, Rows, Snippet, roles } from "../components/settings-parts"
+import { Heading, ListSkeleton, Row, Rows, roles } from "../components/settings-parts"
 import { Link, useParams } from "@tanstack/react-router"
 import {
   BuildingsIcon,
@@ -8,6 +8,7 @@ import {
   KeyIcon,
   MoonIcon,
   PaletteIcon,
+  PlugsConnectedIcon,
   RobotIcon,
   SunIcon,
   UserIcon,
@@ -24,8 +25,9 @@ import { useWorkspace, type DevAs } from "../workspace"
 import { Avatar } from "../components/account-menu"
 import { AccessTokens, LiveMembers } from "./settings-account"
 import { Billing } from "./settings-billing"
+import { Connections } from "./settings-connections"
 
-type SectionId = "profile" | "appearance" | "tokens" | "general" | "members" | "agents" | "billing"
+type SectionId = "profile" | "appearance" | "connections" | "tokens" | "general" | "members" | "agents" | "billing"
 type NavGroup = { label: string; items: ReadonlyArray<{ id: SectionId; label: string; icon: ComponentType<IconProps> }> }
 
 const groups: ReadonlyArray<NavGroup> = [
@@ -34,6 +36,7 @@ const groups: ReadonlyArray<NavGroup> = [
     items: [
       { id: "profile", label: "Profile", icon: UserIcon },
       { id: "appearance", label: "Appearance", icon: PaletteIcon },
+      { id: "connections", label: "Connections", icon: PlugsConnectedIcon },
       { id: "tokens", label: "Access tokens", icon: KeyIcon },
     ],
   },
@@ -125,6 +128,8 @@ function Section({ id, principal }: { id: SectionId; principal: Principal }) {
       return <Appearance />
     case "general":
       return <General principal={principal} />
+    case "connections":
+      return <Connections principal={principal} />
     case "tokens":
       return <AccessTokens principal={principal} />
     case "members":
@@ -362,50 +367,12 @@ function Agents({ principal }: { principal: Principal }) {
           </ul>
         )}
       </Rows>
-      <Connect />
-    </>
-  )
-}
-
-/**
- * Every client reaches the same tools at /mcp. Live, each request needs a token.
- * A dev server (`stdartifacts serve`, `pnpm dev`) has no sign-in and answers only
- * this machine, so local agents connect without one. The server says which it is.
- */
-function Connect() {
-  const { authMode } = useWorkspace()
-  const origin = window.location.origin
-  const url = `${origin}/mcp`
-  const live = authMode ? authMode === "live" : !import.meta.env.DEV
-  return (
-    <>
-      <Rows title="Connect an agent">
-        {live ? (
-          <>
-            <Snippet label="Claude Code" code={`claude mcp add --transport http stdartifacts ${url} --header "Authorization: Bearer $STDARTIFACTS_TOKEN"`} />
-            <Snippet label="Codex" code={`codex mcp add stdartifacts --url ${url} --bearer-token-env-var STDARTIFACTS_TOKEN`} />
-            <Snippet label="ChatGPT" help="Add as a connector in developer mode. Needs a public HTTPS address." code={url} />
-          </>
-        ) : (
-          <>
-            <Snippet label="Claude Code" code={`claude mcp add stdartifacts -e STDARTIFACTS_URL=${origin} -- npx stdartifacts mcp`} />
-            <Snippet label="Claude Code over HTTP" code={`claude mcp add --transport http stdartifacts ${url}`} />
-            <Snippet label="Codex" code={`codex mcp add stdartifacts --url ${url}`} />
-          </>
-        )}
-      </Rows>
       <p className="mt-3 text-[13px] text-muted">
-        {live ? (
-          <>
-            Each request needs a token.{" "}
-            <Link to="/settings/{-$section}" params={{ section: "tokens" }} className="text-accent hover:underline">
-              Create one under Access tokens
-            </Link>
-            , then set STDARTIFACTS_TOKEN to it.
-          </>
-        ) : (
-          "This server has no sign-in, so agents on this machine connect without a token. It only answers requests from this machine."
-        )}
+        To connect Claude, ChatGPT, Codex, Cursor or another agent, see{" "}
+        <Link to="/settings/{-$section}" params={{ section: "connections" }} className="text-accent hover:underline">
+          Connections
+        </Link>
+        .
       </p>
     </>
   )

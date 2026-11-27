@@ -1,5 +1,5 @@
 import { WarningIcon } from "@phosphor-icons/react"
-import { signIn } from "../session"
+import { signIn, takeAfterSignIn } from "../session"
 
 /** The four artifact kinds, as on the landing page. */
 function Mark() {
@@ -39,7 +39,11 @@ export function SignInPage({ problem }: { problem: string | null }) {
           <div className="mt-7 space-y-2">
             <button
               type="button"
-              onClick={() => signIn()}
+              onClick={() => {
+                // Back from "Not you?" on a consent page: sign in, then finish connecting the agent.
+                const after = takeAfterSignIn()
+                signIn(after ? { returnTo: after } : {})
+              }}
               className="flex h-9 w-full items-center justify-center rounded-md bg-accent px-3 font-medium text-accent-text hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
               Continue

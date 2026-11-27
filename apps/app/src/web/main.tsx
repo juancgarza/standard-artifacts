@@ -9,6 +9,7 @@ import { HomePage } from "./pages/home"
 import { ArchivedPage } from "./pages/archived"
 import { FolderPage } from "./pages/folder"
 import { SettingsPage } from "./pages/settings"
+import { AuthorizePage } from "./pages/authorize"
 import "./styles.css"
 
 const rootRoute = createRootRoute({ component: Shell })
@@ -40,6 +41,13 @@ function Gate({ children }: { children: ReactNode }) {
 const invitation = new URLSearchParams(window.location.search).get("invitation_token")
 if (invitation) {
   signIn({ invitationToken: invitation, returnTo: "/" })
+} else if (window.location.pathname === "/authorize") {
+  // Connecting an agent (OAuth consent): a page of its own, without the workspace around it.
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <AuthorizePage />
+    </StrictMode>,
+  )
 } else {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
