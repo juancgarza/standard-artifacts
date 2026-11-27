@@ -22,6 +22,8 @@
     // (see "Self-hosting with sign-in" in docs/development.md).
     "AUTH_MODE": "dev"
     // Optional, for content search: TURBOPUFFER_API_KEY (a secret, not a var), TURBOPUFFER_URL, SEARCH_PREFIX.
+    // Optional, for billing (Cloud): the secrets STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, and the vars
+    // STRIPE_PRICE_MONTHLY and STRIPE_PRICE_ANNUAL. With none of them, billing is off.
   },
   "durable_objects": {
     "bindings": [

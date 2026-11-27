@@ -105,6 +105,11 @@ export const App = Cloudflare.Website.StaticSite(
       ...(process.env.WORKOS_CLIENT_ID && { WORKOS_CLIENT_ID: process.env.WORKOS_CLIENT_ID }),
       ...(process.env.WORKOS_COOKIE_PASSWORD && { WORKOS_COOKIE_PASSWORD: Redacted.make(process.env.WORKOS_COOKIE_PASSWORD) }),
       ...(process.env.APP_URL && { APP_URL: process.env.APP_URL }),
+      // Billing (Free and Team on Stripe). All four turn it on; with none, billing is off and nothing changes.
+      ...(process.env.STRIPE_SECRET_KEY && { STRIPE_SECRET_KEY: Redacted.make(process.env.STRIPE_SECRET_KEY) }),
+      ...(process.env.STRIPE_WEBHOOK_SECRET && { STRIPE_WEBHOOK_SECRET: Redacted.make(process.env.STRIPE_WEBHOOK_SECRET) }),
+      ...(process.env.STRIPE_PRICE_MONTHLY && { STRIPE_PRICE_MONTHLY: process.env.STRIPE_PRICE_MONTHLY }),
+      ...(process.env.STRIPE_PRICE_ANNUAL && { STRIPE_PRICE_ANNUAL: process.env.STRIPE_PRICE_ANNUAL }),
       // Ticketless "dev owner" access only ever exists in dev stages.
       AUTH_MODE: stack.stage.startsWith("dev") ? "dev" : "live",
       // Dev answers localhost only; this lets a tunnel host in too (see dev-guard.ts).
