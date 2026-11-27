@@ -117,7 +117,7 @@ export class Billing extends Context.Service<
         return new Unavailable({ message: "The account service didn't answer. Try again in a moment." })
       }
 
-      /** The org's billing as WorkOS holds it, plus the raw metadata (to tell what a write would change). */
+      /** The org's billing as WorkOS holds it, and the org (whose raw metadata says what a write would change). */
       const orgBilling = Effect.fn("Billing.orgBilling")(function* (orgId: string) {
         const { wos } = yield* clients
         const org = yield* wos.getOrganization(orgId).pipe(Effect.mapError(fromWorkOS))
@@ -130,13 +130,22 @@ export class Billing extends Context.Service<
         return memberships.map(membershipRole)
       })
 
-      /** Mirror a state into WorkOS (only what changed), then the org's cell, which tickets and tokens read. */
-      const record = Effect.fn("Billing.record")(function* (orgId: string, current: Readonly<Record<string, unknown>> | null | undefined, state: BillingState) {
+      /**
+       * Mirror a state into WorkOS (only what changed), then the org's cell, which tickets and tokens read.
+       * `observedAt` is when Stripe was asked: the cell keeps the newest observation, so of two webhooks
+       * racing, the one that read Stripe first can't overwrite the other there.
+       */
+      const record = Effect.fn("Billing.record")(function* (
+        orgId: string,
+        current: Readonly<Record<string, unknown>> | null | undefined,
+        state: BillingState,
+        observedAt: number,
+      ) {
         const { wos } = yield* clients
         const metadata = billingMetadata(state)
         if (metadataChanged(current, metadata)) yield* wos.updateOrganizationMetadata(orgId, metadata).pipe(Effect.mapError(fromWorkOS))
         yield* Effect.tryPromise({
-          try: async () => void (await cellOf(orgId).setBilling(state.plan, state.status, Date.now())),
+          try: async () => void (await cellOf(orgId).setBilling(state.plan, state.status, observedAt)),
           catch: (e) => new Unavailable({ message: `Couldn't update the workspace's plan: ${String(e)}` }),
         })
       })
@@ -291,15 +300,17 @@ export class Billing extends Context.Service<
           console.warn(`Billing: org ${orgId} bills through ${known}, not ${customerId}; ignoring its event`)
           return "ignored" as const
         }
+        let observedAt = Date.now()
         let subscriptions = yield* stripe.listSubscriptions(customerId).pipe(Effect.mapError(fromStripe))
         if (checkoutSubscription) {
           const stale = subscriptions.filter((s) => s.id !== checkoutSubscription && ["paused", "unpaid", "past_due", "incomplete"].includes(s.status))
           if (stale.length) {
             yield* Effect.forEach(stale, (s) => stripe.cancelSubscription(s.id).pipe(Effect.mapError(fromStripe)), { concurrency: 2, discard: true })
+            observedAt = Date.now()
             subscriptions = yield* stripe.listSubscriptions(customerId).pipe(Effect.mapError(fromStripe))
           }
         }
-        yield* record(orgId, org.metadata, stateFromSubscriptions(customerId, subscriptions, prices))
+        yield* record(orgId, org.metadata, stateFromSubscriptions(customerId, subscriptions, prices), observedAt)
         return "synced" as const
       })
 
