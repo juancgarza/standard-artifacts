@@ -63,6 +63,13 @@ export const Mention = Schema.Struct({
   result: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
+  /**
+   * Set on a queued request the hosted runner won't take, because hosted runs
+   * are for paying workspaces (`plan`) or the trial's allowance is used up
+   * (`trial-limit`). The request stays filed for the person's own agent
+   * (`stdartifacts agent serve`, or MCP); `message` says so, for the app to show.
+   */
+  unhosted: Schema.optionalKey(Schema.Struct({ reason: Schema.Literals(["plan", "trial-limit"]), message: Schema.String })),
 })
 export interface Mention extends Schema.Schema.Type<typeof Mention> {}
 

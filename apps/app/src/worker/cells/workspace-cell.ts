@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers"
 import type { Env } from "../env"
-import { runnerEnabled } from "./runner-cell"
+import { TRIAL_HOSTED_RUNS, billingOn, hostedRuns, hostedRunsMessage, runnerRole, statusOf, type HostedRuns } from "../plans"
+import { runnerEnabled, type RunOutcome } from "./runner-cell"
 import {
   canEdit,
   folderProblem,
@@ -170,7 +171,7 @@ export class WorkspaceCell extends DurableObject<Env> {
       .toArray()[0]
     this.rememberOrg(p)
     this.ctx.waitUntil(this.scheduleDispatch())
-    return row ? { ok: true, value: toMention(row) } : notFound()
+    return row ? { ok: true, value: this.present(row) } : notFound()
   }
 
   /** Stop a request: a queued one never runs; a running one is told to stop (the runner polls). */
@@ -191,7 +192,7 @@ export class WorkspaceCell extends DurableObject<Env> {
   mention(id: string): Mention | null {
     this.inbox()
     const row = this.sql.exec<MentionRow>("SELECT * FROM mentions WHERE id = ?", id).toArray()[0]
-    return row ? toMention(row) : null
+    return row ? this.present(row) : null
   }
 
   /**
@@ -221,14 +222,15 @@ export class WorkspaceCell extends DurableObject<Env> {
 
   mentions(artifactId?: string): Mention[] {
     this.inbox()
+    const verdict = this.hostedRuns()
     if (artifactId) {
       // Open threads are what the canvas shows, however old; plus recent history.
       return this.sql
         .exec<MentionRow>("SELECT * FROM mentions WHERE artifact_id = ? AND (resolved = 0 OR created_at > ?) ORDER BY created_at DESC LIMIT 200", artifactId, new Date(Date.now() - 864e5).toISOString())
         .toArray()
-        .map(toMention)
+        .map((r) => this.present(r, verdict))
     }
-    return this.sql.exec<MentionRow>("SELECT * FROM mentions ORDER BY created_at DESC LIMIT 50").toArray().map(toMention)
+    return this.sql.exec<MentionRow>("SELECT * FROM mentions ORDER BY created_at DESC LIMIT 50").toArray().map((r) => this.present(r, verdict))
   }
 
   /** Resolve a thread: every request on the same target. Queued or running ones are cancelled first. */
@@ -271,7 +273,8 @@ export class WorkspaceCell extends DurableObject<Env> {
 
   /** Wake for the next mention that will need a run: when it settles, or when the last attempt's lease runs out. */
   private async scheduleDispatch() {
-    if (!runnerEnabled(this.env)) return
+    // Without hosted runs (billing), queued mentions wait for the person's own agent: no alarm, no container.
+    if (!runnerEnabled(this.env) || !this.hostedRuns().allowed) return
     this.inbox()
     const next = this.sql
       .exec<{ at: number | null }>(
@@ -284,7 +287,7 @@ export class WorkspaceCell extends DurableObject<Env> {
   }
 
   override async alarm() {
-    if (!runnerEnabled(this.env)) return
+    if (!runnerEnabled(this.env) || !this.hostedRuns().allowed) return
     this.inbox()
     const retryAt = await this.dispatch()
     if (retryAt !== null) await this.ctx.storage.setAlarm(retryAt)
@@ -312,6 +315,8 @@ export class WorkspaceCell extends DurableObject<Env> {
       console.error("A mention is ready but this org's details aren't known yet; it waits for the next visit")
       return null
     }
+    const hosted = this.hostedRuns()
+    if (!hosted.allowed) return null
 
     const usedToday = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM mentions WHERE dispatched_at > ?", now - DAY_MS).one().n
     const dailyLimit = Number(this.env.RUNNER_DAILY_RUNS ?? DEFAULT_DAILY_RUNS)
@@ -331,19 +336,34 @@ export class WorkspaceCell extends DurableObject<Env> {
       )
     }
     const allowed = ready.slice(0, inDailyLimit)
-    const starting = allowed.slice(0, slots)
-    await Promise.all(starting.map((m) => this.startRun(m, org, now)))
-    return allowed.length > starting.length ? now + RETRY_MS : null
+    // On a trial, only as many new runs as its allowance has left. A mention already counted can be retried.
+    let trialLeft = hosted.trial ? TRIAL_HOSTED_RUNS - this.trialRunsUsed() : Infinity
+    const entitled = allowed.filter((m) => (this.hostedRun(m.id) ? true : trialLeft-- > 0))
+    const starting = entitled.slice(0, slots)
+    await Promise.all(starting.map((m) => this.startRun(m, org, now, hosted)))
+    return entitled.length > starting.length ? now + RETRY_MS : null
   }
 
-  private async startRun(m: MentionRow, org: { orgId: string; orgName: string; plan: Principal["plan"] }, now: number) {
+  private async startRun(m: MentionRow, org: { orgId: string; orgName: string; plan: Principal["plan"] }, now: number, hosted: Extract<HostedRuns, { allowed: true }>) {
     const runner = this.env.RUNNER
     if (!runner) return
-    // Recorded first, so a crash here can't turn into a burst of containers.
+    // Recorded first, so a crash here can't turn into a burst of containers (or a trial's allowance overrun).
     this.sql.exec("UPDATE mentions SET dispatched_at = ?, dispatches = dispatches + 1 WHERE id = ?", now, m.id)
+    this.hostedRunsTable()
+    this.sql.exec("INSERT OR IGNORE INTO hosted_runs (mention_id, started_at, trial) VALUES (?, ?, ?)", m.id, now, hosted.trial ? 1 : 0)
     try {
       const cell = runner.get(runner.idFromName(`${org.orgId}:${m.id}`))
-      await cell.run({ ...org, requestedBy: m.requested_by, mentionId: m.id })
+      const outcome: RunOutcome = await cell.run({ ...org, requestedBy: m.requested_by, role: this.requesterRole(m.requested_by, org.plan), mentionId: m.id })
+      if (!outcome.started) {
+        // The runner checked again and said no. Nothing ran, so nothing counts; the mention stays for the person's own agent.
+        this.sql.exec("DELETE FROM hosted_runs WHERE mention_id = ?", m.id)
+        if (outcome.reason === "read-only") {
+          this.sql.exec(
+            "UPDATE mentions SET status = 'error', result = ?, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'queued'",
+            "The person who asked can only view this workspace now, so Claude can't make changes for them.", new Date().toISOString(), m.id,
+          )
+        }
+      }
     } catch (e) {
       console.error(`Couldn't start a run for ${m.id}:`, e)
       // Try sooner than a whole lease from now: capacity and rate limits usually pass quickly.
@@ -352,6 +372,79 @@ export class WorkspaceCell extends DurableObject<Env> {
   }
 
   /** The org's details, with its plan as billing last said (see `setBilling`), else as the last ticket said. */
+  // --- Hosted runs and billing --------------------------------------------------------------
+
+  /** Each mention a hosted run was started for, once (retries don't count again), and whether it was during the trial. */
+  private hostedRunsTable() {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS hosted_runs (mention_id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, trial INTEGER NOT NULL)")
+  }
+
+  private trialRunsUsed(): number {
+    this.hostedRunsTable()
+    return this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM hosted_runs WHERE trial = 1").one().n
+  }
+
+  private hostedRun(mentionId: string): boolean {
+    this.hostedRunsTable()
+    return this.sql.exec("SELECT 1 FROM hosted_runs WHERE mention_id = ?", mentionId).toArray().length > 0
+  }
+
+  /** Whether the hosted runner may start runs for this org now (see `hostedRuns` in plans.ts). */
+  private hostedRuns(): HostedRuns {
+    const billing = this.billing()
+    return hostedRuns({
+      billingEnabled: billingOn(this.env),
+      status: billing ? statusOf(billing.status) : null,
+      plan: this.org()?.plan ?? null,
+      trialRunsUsed: this.trialRunsUsed(),
+    })
+  }
+
+  /**
+   * RunnerCell asks before it starts a container, so the check doesn't rest on the caller alone. During a
+   * trial, a run may start only for a mention this cell counted against the allowance.
+   */
+  mayHostRun(mentionId: string): HostedRuns {
+    const verdict = this.hostedRuns()
+    if (verdict.allowed || verdict.reason !== "trial-limit") return verdict
+    return this.hostedRun(mentionId) ? { allowed: true, trial: true } : verdict
+  }
+
+  /** Hosted runs for Settings → Billing, or null where this deploy has no hosted runner. */
+  hostedRunsInfo(): { available: boolean; reason: "plan" | "trial-limit" | null; trialUsed: number; trialLimit: number; started: number } | null {
+    if (!runnerEnabled(this.env)) return null
+    const verdict = this.hostedRuns()
+    this.hostedRunsTable()
+    return {
+      available: verdict.allowed,
+      reason: verdict.allowed ? null : verdict.reason,
+      trialUsed: this.trialRunsUsed(),
+      trialLimit: TRIAL_HOSTED_RUNS,
+      started: this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM hosted_runs").one().n,
+    }
+  }
+
+  /**
+   * The role a hosted run acts with: the requester's as this org last saw it (their ticket's, already under
+   * the plan then), under the plan now, never above editor. Someone the org hasn't seen counts as an editor,
+   * since only people who can edit file mentions.
+   */
+  private requesterRole(requestedBy: string, plan: Principal["plan"]): Principal["role"] {
+    this.sharing()
+    const person = requestedBy.split(":").at(-1) ?? requestedBy
+    const seen = this.sql.exec<{ role: Principal["role"] }>("SELECT role FROM principals WHERE key = ?", person).toArray()[0]
+    return runnerRole(seen?.role ?? "editor", plan, billingOn(this.env))
+  }
+
+  /** A mention for the API: a queued one the hosted runner won't take says why. `verdict`: the org's, if already known. */
+  private present(row: MentionRow, verdict?: HostedRuns): Mention {
+    const m = toMention(row)
+    if (row.status !== "queued" || !runnerEnabled(this.env)) return m
+    const org = verdict ?? this.hostedRuns()
+    if (org.allowed || (org.reason === "trial-limit" && this.hostedRun(row.id))) return m
+    return { ...m, unhosted: { reason: org.reason, message: hostedRunsMessage(org.reason) } }
+  }
+
   private org(): { orgId: string; orgName: string; plan: Principal["plan"] } | null {
     const exists = this.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'org_meta'").toArray().length > 0
     if (!exists) return null
@@ -378,6 +471,8 @@ export class WorkspaceCell extends DurableObject<Env> {
       "INSERT INTO billing (id, plan, status, updated_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET plan = excluded.plan, status = excluded.status, updated_at = excluded.updated_at WHERE excluded.updated_at >= billing.updated_at",
       plan, status, at,
     )
+    // Upgraded: requests that waited (unclaimed by anyone's own agent) can start now.
+    this.ctx.waitUntil(this.scheduleDispatch())
   }
 
   billing(): { plan: Principal["plan"]; status: string } | null {

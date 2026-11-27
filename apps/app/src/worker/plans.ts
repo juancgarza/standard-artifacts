@@ -218,3 +218,55 @@ export function upgradeReason(role: Role, state: BillingState, billingEnabled: b
 
 /** Seats to bill: every Owner and Editor, and never fewer than one. */
 export const seatsFor = (roles: ReadonlyArray<Role>) => Math.max(1, roles.filter(isPaidRole).length)
+
+// --- Hosted agent runs -----------------------------------------------------------------------------
+
+/** Hosted `@claude` runs a workspace gets during its Team trial, in all. After that, Team needs a payment method. */
+export const TRIAL_HOSTED_RUNS = 25
+
+export type HostedRunsRefusal = "plan" | "trial-limit"
+
+/** Whether the hosted runner may start a run for the org. `trial`: each new run uses up the trial's allowance. */
+export type HostedRuns = { readonly allowed: true; readonly trial: boolean } | { readonly allowed: false; readonly reason: HostedRunsRefusal }
+
+/**
+ * Hosted runs are for paying workspaces. With billing on: Team that's active,
+ * or trialing with allowance left (TRIAL_HOSTED_RUNS in all). Free, past due,
+ * paused and canceled get none. An org with no billing yet but on Team (set by
+ * hand, a comp) counts as active. With billing off, every workspace gets them,
+ * as before. A refused mention is still filed: the person's own agent
+ * (`stdartifacts agent serve`, or MCP) can take it.
+ */
+export function hostedRuns(input: {
+  readonly billingEnabled: boolean
+  /** The org's billing status as the webhook last set it, or null if it never has. */
+  readonly status: BillingStatus | null
+  /** The org's plan (used when there's no billing status: Team by hand). */
+  readonly plan: Plan | null
+  readonly trialRunsUsed: number
+}): HostedRuns {
+  if (!input.billingEnabled) return { allowed: true, trial: false }
+  const status = input.status ?? (input.plan === "team" ? "active" : "none")
+  if (status === "active") return { allowed: true, trial: false }
+  if (status === "trialing") return input.trialRunsUsed < TRIAL_HOSTED_RUNS ? { allowed: true, trial: true } : { allowed: false, reason: "trial-limit" }
+  return { allowed: false, reason: "plan" }
+}
+
+/** What a person sees on a request the hosted runner won't take. */
+export function hostedRunsMessage(reason: HostedRunsRefusal): string {
+  return reason === "trial-limit"
+    ? `This trial's ${TRIAL_HOSTED_RUNS} hosted runs are used up. Add a payment method in Settings → Billing to keep them, or run your own agent: stdartifacts agent serve`
+    : "Hosted runs are part of Team. Upgrade in Settings → Billing, or run your own agent: stdartifacts agent serve"
+}
+
+/**
+ * The role a hosted run acts with for the person who asked: their role under
+ * the org's plan now (an Editor on Free limits reads), and never above editor.
+ */
+export function runnerRole(requesterRole: Role, plan: Plan, billingEnabled: boolean): Role {
+  const role = effectiveRole(requesterRole, plan, billingEnabled)
+  return role === "owner" ? "editor" : role
+}
+
+/** Whether billing is on for a Worker's raw env (cells read env, not Config). Dev mode never bills. */
+export const billingOn = (env: BillingConfig & { readonly AUTH_MODE?: string | undefined }) => env.AUTH_MODE !== "dev" && billingSetup(env).enabled

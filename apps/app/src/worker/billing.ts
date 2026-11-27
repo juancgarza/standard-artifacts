@@ -165,7 +165,14 @@ export class Billing extends Context.Service<
         if (!enabled) {
           return { enabled: false, plan: p.plan, status: "none", interval: null, seats: 0, paidMembers: 0, trialEndsAt: null, trialAvailable: false, canManage: false } as const
         }
-        const [{ state }, roles] = yield* Effect.all([orgBilling(p.orgId), paidMembers(p.orgId)], { concurrency: 2 })
+        const [{ state }, roles, hosted] = yield* Effect.all(
+          [
+            orgBilling(p.orgId),
+            paidMembers(p.orgId),
+            Effect.tryPromise(async () => await cellOf(p.orgId).hostedRunsInfo()).pipe(Effect.orElseSucceed(() => null)),
+          ],
+          { concurrency: 3 },
+        )
         return {
           enabled: true,
           plan: state.plan,
@@ -177,6 +184,7 @@ export class Billing extends Context.Service<
           // Once per workspace: "none" means it has never had a subscription (a lapsed one reads as paused or canceled).
           trialAvailable: state.status === "none",
           canManage: p.actor.type === "user" && p.role === "owner",
+          ...(hosted && { hostedRuns: { available: hosted.available, reason: hosted.reason, trialUsed: hosted.trialUsed, trialLimit: hosted.trialLimit } }),
         } satisfies BillingInfo
       })
 

@@ -152,6 +152,18 @@ export const BillingInfo = Schema.Struct({
   trialAvailable: Schema.Boolean,
   /** Owners start Checkout and open the billing portal. */
   canManage: Schema.Boolean,
+  /**
+   * Hosted `@claude` runs, where this server has them: whether they're on for the workspace (Team, or a trial with
+   * runs left), and the trial's allowance.
+   */
+  hostedRuns: Schema.optionalKey(
+    Schema.Struct({
+      available: Schema.Boolean,
+      reason: Schema.NullOr(Schema.Literals(["plan", "trial-limit"])),
+      trialUsed: Schema.Int,
+      trialLimit: Schema.Int,
+    }),
+  ),
 })
 export interface BillingInfo extends Schema.Schema.Type<typeof BillingInfo> {}
 
