@@ -8,9 +8,14 @@ import {
   billingMetadata,
   billingSetup,
   currentSubscription,
+  TRIAL_HOSTED_RUNS,
+  billingOn,
   effectiveRole,
+  hostedRuns,
+  hostedRunsMessage,
   metadataChanged,
   planOf,
+  runnerRole,
   seatsFor,
   stateFromSubscriptions,
   statusOf,
@@ -258,5 +263,57 @@ describe("the invite gate", () => {
 
   test("an org comped to Team by hand (plan=team, no subscription) isn't gated", () => {
     assert.equal(upgradeReason("editor", billingFromMetadata({ plan: "team" }), true), undefined)
+  })
+})
+
+describe("hosted runs", () => {
+  const on = (status: Parameters<typeof hostedRuns>[0]["status"], trialRunsUsed = 0, plan: "free" | "team" | null = null) =>
+    hostedRuns({ billingEnabled: true, status, plan, trialRunsUsed })
+
+  test("entitled: Team that's active, or trialing with runs left", () => {
+    assert.deepEqual(on("active"), { allowed: true, trial: false })
+    assert.deepEqual(on("trialing"), { allowed: true, trial: true })
+    assert.deepEqual(on("trialing", TRIAL_HOSTED_RUNS - 1), { allowed: true, trial: true })
+  })
+
+  test("not entitled: Free, past due, paused, canceled, incomplete", () => {
+    for (const status of ["none", "past_due", "paused", "canceled", "incomplete"] as const) assert.deepEqual(on(status), { allowed: false, reason: "plan" }, status)
+    assert.deepEqual(on(null, 0, "free"), { allowed: false, reason: "plan" }, "never billed")
+    assert.deepEqual(on(null), { allowed: false, reason: "plan" })
+  })
+
+  test("the trial's allowance runs out at the constant, and says so", () => {
+    assert.equal(TRIAL_HOSTED_RUNS, 25)
+    assert.deepEqual(on("trialing", TRIAL_HOSTED_RUNS), { allowed: false, reason: "trial-limit" })
+    assert.deepEqual(on("trialing", TRIAL_HOSTED_RUNS + 3), { allowed: false, reason: "trial-limit" })
+    assert.match(hostedRunsMessage("trial-limit"), /trial's 25 hosted runs are used up/)
+    assert.match(hostedRunsMessage("plan"), /Hosted runs are part of Team\. Upgrade .*, or run your own agent: stdartifacts agent serve/)
+  })
+
+  test("Team set by hand (no billing status) counts as active", () => {
+    assert.deepEqual(on(null, 0, "team"), { allowed: true, trial: false })
+  })
+
+  test("with billing off, every workspace runs, whatever its status", () => {
+    for (const status of [null, "none", "paused", "past_due", "trialing"] as const) {
+      assert.deepEqual(hostedRuns({ billingEnabled: false, status, plan: "free", trialRunsUsed: 999 }), { allowed: true, trial: false })
+    }
+  })
+
+  test("a run acts with the requester's effective role, never above editor", () => {
+    assert.equal(runnerRole("owner", "team", true), "editor")
+    assert.equal(runnerRole("editor", "team", true), "editor")
+    assert.equal(runnerRole("editor", "free", true), "viewer", "an Editor on Free limits reads, and so does their run")
+    assert.equal(runnerRole("viewer", "team", true), "viewer")
+    assert.equal(runnerRole("editor", "free", false), "editor", "billing off: as before")
+    assert.equal(runnerRole("owner", "free", false), "editor")
+  })
+
+  test("cells tell billing is on from the raw env, the same way the Billing service does", () => {
+    const all = { STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: "whsec_x", STRIPE_PRICE_MONTHLY: "p_m", STRIPE_PRICE_ANNUAL: "p_y", WORKOS_API_KEY: "sk_x" }
+    assert.equal(billingOn(all), true)
+    assert.equal(billingOn({ ...all, AUTH_MODE: "live" }), true)
+    assert.equal(billingOn({ ...all, AUTH_MODE: "dev" }), false)
+    assert.equal(billingOn({ WORKOS_API_KEY: "sk_x" }), false)
   })
 })

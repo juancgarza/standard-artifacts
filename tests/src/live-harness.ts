@@ -28,14 +28,21 @@ const freePort = () =>
 export interface LiveApp {
   readonly base: string
   readonly fake: FakeWorkOS
+  /** The Miniflare instance, for calling a cell over RPC (`mf.getDurableObjectNamespace("WORKSPACE")`). */
+  readonly mf: Miniflare
   close(): Promise<void>
 }
 
 /**
  * Start the Worker in live mode. `bindings` override or remove (undefined) the defaults, e.g. to leave sign-in unconfigured.
  * `persist` keeps the Durable Objects in that directory instead of memory, so a second app can pick up where one left off.
+ * `runner` binds RunnerCell (hosted agent runs) with a model key, as Cloud does. Miniflare has no containers, so a run
+ * that gets past the checks fails to launch, which is enough to tell whether one was attempted.
  */
-export async function startLive(bindings: Record<string, string | undefined> = {}, options: { readonly persist?: string } = {}): Promise<LiveApp> {
+export async function startLive(
+  bindings: Record<string, string | undefined> = {},
+  options: { readonly persist?: string; readonly runner?: boolean } = {},
+): Promise<LiveApp> {
   if (!existsSync(`${dist}worker.mjs`)) throw new Error("packages/server isn't built: run pnpm --filter @standard-artifacts/server build")
   const fake = await startFakeWorkOS()
   const port = await freePort()
@@ -47,9 +54,11 @@ export async function startLive(bindings: Record<string, string | undefined> = {
     WORKOS_COOKIE_PASSWORD: COOKIE_PASSWORD,
     WORKOS_API_URL: fake.url,
     SEARCH_PREFIX: "standard-artifacts-live-test",
+    ...(options.runner && { ANTHROPIC_API_KEY: "test-anthropic-key" }),
     ...bindings,
   }
-  const cells = { WORKSPACE: "WorkspaceCell", TABLE: "TableCell", BOARD: "BoardCell", DOC: "DocCell", TRACKER: "TrackerCell", MCP: "McpCell" }
+  const cells: Record<string, string> = { WORKSPACE: "WorkspaceCell", TABLE: "TableCell", BOARD: "BoardCell", DOC: "DocCell", TRACKER: "TrackerCell", MCP: "McpCell" }
+  if (options.runner) cells.RUNNER = "RunnerCell"
   const mf = new Miniflare({
     name: "standard-artifacts-live-test",
     host: "127.0.0.1",
@@ -72,6 +81,7 @@ export async function startLive(bindings: Record<string, string | undefined> = {
   return {
     base: `http://127.0.0.1:${ready.port}`,
     fake,
+    mf,
     close: async () => {
       await mf.dispose()
       await fake.close()
