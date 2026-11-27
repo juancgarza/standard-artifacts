@@ -40,6 +40,11 @@ export interface FakeStripe {
   readonly portals: Array<Record<string, string>>
   /** Every API call, as "METHOD /path". */
   readonly calls: Array<string>
+  /** What scripts/stripe-setup.mjs makes: products, prices, portal configurations, webhook endpoints (flat params). */
+  readonly products: Map<string, Record<string, any>>
+  readonly prices: Map<string, Record<string, any>>
+  readonly portalConfigurations: Map<string, Record<string, any>>
+  readonly webhookEndpoints: Map<string, Record<string, any>>
   /** What Checkout does when it completes: a subscription for the customer. */
   subscribe(customer: string, options?: { status?: string; price?: string; quantity?: number; trialDays?: number; orgId?: string }): Subscription
   setStatus(id: string, status: string): void
@@ -50,7 +55,13 @@ export interface FakeStripe {
 
 const id = (prefix: string) => `${prefix}_${randomBytes(9).toString("hex")}`
 
-export async function startFakeStripe(): Promise<FakeStripe> {
+/** `seedPortal`: start with the portal configuration the setup script would have made (default true). */
+export async function startFakeStripe(options: { seedPortal?: boolean } = {}): Promise<FakeStripe> {
+  const products = new Map<string, Record<string, any>>()
+  const prices = new Map<string, Record<string, any>>()
+  const portalConfigurations = new Map<string, Record<string, any>>()
+  const webhookEndpoints = new Map<string, Record<string, any>>()
+  if (options.seedPortal ?? true) portalConfigurations.set("bpc_fake", { id: "bpc_fake", active: true, metadata: { app: "standard-artifacts" } })
   const customers = new Map<string, Customer>()
   const subscriptions = new Map<string, Subscription>()
   const checkouts: Array<Record<string, string>> = []
@@ -80,6 +91,10 @@ export async function startFakeStripe(): Promise<FakeStripe> {
     checkouts,
     portals,
     calls,
+    products,
+    prices,
+    portalConfigurations,
+    webhookEndpoints,
     subscribe: (customer, o = {}) => {
       const trialDays = o.trialDays ?? 0
       const s: Subscription = {
@@ -160,8 +175,78 @@ export async function startFakeStripe(): Promise<FakeStripe> {
       portals.push(form)
       return send(res, 200, { object: "billing_portal.session", id: id("bps"), url: `https://billing.stripe.test/p/session/${form.customer}` })
     }
-    if (route === "GET /v1/billing_portal/configurations") {
-      return send(res, 200, { object: "list", data: [{ id: "bpc_fake", active: true, metadata: { app: "standard-artifacts" } }], has_more: false })
+    const list = (data: Array<unknown>) => send(res, 200, { object: "list", data, has_more: false })
+    /** `a[0]`, `a[1]`… (or `a[]`) as an array. */
+    const arrayOf = (name: string) =>
+      Object.entries(form)
+        .filter(([k]) => k === `${name}[]` || new RegExp(`^${name.replace(/[[\]]/g, "\\$&")}\\[\\d+\\]$`).test(k))
+        .map(([, v]) => v)
+
+    if (route === "GET /v1/billing_portal/configurations") return list([...portalConfigurations.values()].filter((c) => c.active))
+    if (route === "POST /v1/billing_portal/configurations") {
+      const c = { id: id("bpc"), active: true, ...form, metadata: prefixed(form, "metadata") }
+      portalConfigurations.set(c.id, c)
+      return send(res, 200, c)
+    }
+    if ((m = path.match(/^\/v1\/billing_portal\/configurations\/([\w-]+)$/)) && req.method === "POST") {
+      const c = portalConfigurations.get(m[1]!)
+      if (!c) return error(res, 404, "No such configuration")
+      Object.assign(c, form, { metadata: prefixed(form, "metadata") })
+      return send(res, 200, c)
+    }
+
+    if (route === "POST /v1/products") {
+      if (form.id && products.has(form.id)) return error(res, 400, "Product already exists")
+      const p = { id: form.id ?? id("prod"), active: true, name: form.name, metadata: prefixed(form, "metadata") }
+      products.set(p.id, p)
+      return remember(p)
+    }
+    if ((m = path.match(/^\/v1\/products\/([\w-]+)$/))) {
+      const p = products.get(m[1]!)
+      if (!p) return error(res, 404, "No such product")
+      if (req.method === "POST") Object.assign(p, { active: form.active !== "false" })
+      return send(res, 200, p)
+    }
+    if (route === "GET /v1/prices") {
+      const keys = arrayOf("lookup_keys")
+      return list([...prices.values()].filter((p) => p.active && (!keys.length || keys.includes(p.lookup_key))))
+    }
+    if (route === "POST /v1/prices") {
+      if (!products.has(form.product ?? "")) return error(res, 400, "No such product")
+      if (form.lookup_key) {
+        const holder = [...prices.values()].find((p) => p.lookup_key === form.lookup_key)
+        if (holder && form.transfer_lookup_key !== "true") return error(res, 400, "Lookup key in use")
+        if (holder) holder.lookup_key = null
+      }
+      const p = {
+        id: id("price"),
+        active: true,
+        product: form.product,
+        currency: form.currency,
+        unit_amount: Number(form.unit_amount),
+        lookup_key: form.lookup_key ?? null,
+        recurring: { interval: form["recurring[interval]"], usage_type: form["recurring[usage_type]"] },
+      }
+      prices.set(p.id, p)
+      return remember(p)
+    }
+
+    if (route === "GET /v1/webhook_endpoints") return list([...webhookEndpoints.values()].map(({ secret: _, ...w }) => w))
+    if (route === "POST /v1/webhook_endpoints") {
+      const w = { id: id("we"), url: form.url, api_version: form.api_version, enabled_events: arrayOf("enabled_events"), secret: `whsec_${randomBytes(16).toString("hex")}` }
+      webhookEndpoints.set(w.id, w)
+      return send(res, 200, w)
+    }
+    if ((m = path.match(/^\/v1\/webhook_endpoints\/([\w-]+)$/))) {
+      const w = webhookEndpoints.get(m[1]!)
+      if (!w) return error(res, 404, "No such webhook endpoint")
+      if (req.method === "DELETE") {
+        webhookEndpoints.delete(w.id)
+        return send(res, 200, { id: w.id, deleted: true })
+      }
+      if (req.method === "POST") w.enabled_events = arrayOf("enabled_events")
+      const { secret: _, ...shown } = w
+      return send(res, 200, shown)
     }
     error(res, 404, `Unrecognized request URL (${route})`)
   })
