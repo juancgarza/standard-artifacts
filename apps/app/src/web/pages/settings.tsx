@@ -3,6 +3,7 @@ import { Heading, ListSkeleton, Row, Rows, Snippet, roles } from "../components/
 import { Link, useParams } from "@tanstack/react-router"
 import {
   BuildingsIcon,
+  CreditCardIcon,
   DesktopIcon,
   KeyIcon,
   MoonIcon,
@@ -22,8 +23,9 @@ import { timeAgo } from "../time"
 import { useWorkspace, type DevAs } from "../workspace"
 import { Avatar } from "../components/account-menu"
 import { AccessTokens, LiveMembers } from "./settings-account"
+import { Billing } from "./settings-billing"
 
-type SectionId = "profile" | "appearance" | "tokens" | "general" | "members" | "agents"
+type SectionId = "profile" | "appearance" | "tokens" | "general" | "members" | "agents" | "billing"
 type NavGroup = { label: string; items: ReadonlyArray<{ id: SectionId; label: string; icon: ComponentType<IconProps> }> }
 
 const groups: ReadonlyArray<NavGroup> = [
@@ -41,6 +43,7 @@ const groups: ReadonlyArray<NavGroup> = [
       { id: "general", label: "General", icon: BuildingsIcon },
       { id: "members", label: "Members", icon: UsersThreeIcon },
       { id: "agents", label: "Agents", icon: RobotIcon },
+      { id: "billing", label: "Billing", icon: CreditCardIcon },
     ],
   },
 ]
@@ -51,12 +54,15 @@ const guestGroups: ReadonlyArray<NavGroup> = [{ label: "Personal", items: groups
 
 /** Personal and workspace settings. A normal page, so it takes a tab like any other and links can point at a section. */
 /** Access tokens need an account: a dev server has none (its CLI and MCP need no token). */
-const devGroups: ReadonlyArray<NavGroup> = groups.map((g) => ({ ...g, items: g.items.filter((s) => s.id !== "tokens") }))
+const devGroups: ReadonlyArray<NavGroup> = groups.map((g) => ({ ...g, items: g.items.filter((s) => s.id !== "tokens" && s.id !== "billing") }))
+
+/** Billing shows only where the server bills (Cloud). */
+const unbilledGroups: ReadonlyArray<NavGroup> = groups.map((g) => ({ ...g, items: g.items.filter((s) => s.id !== "billing") }))
 
 export function SettingsPage() {
-  const { principal, account } = useWorkspace()
+  const { principal, account, billing } = useWorkspace()
   const { section } = useParams({ from: "/settings/{-$section}" })
-  const visible = principal?.actor.type === "guest" ? guestGroups : account ? groups : devGroups
+  const visible = principal?.actor.type === "guest" ? guestGroups : account ? (billing ? groups : unbilledGroups) : devGroups
   const items = visible.flatMap((g) => g.items)
   const active = items.find((s) => s.id === section) ?? items[0]!
 
@@ -125,6 +131,8 @@ function Section({ id, principal }: { id: SectionId; principal: Principal }) {
       return account ? <LiveMembers principal={principal} /> : <Members principal={principal} />
     case "agents":
       return <Agents principal={principal} />
+    case "billing":
+      return <Billing principal={principal} />
   }
 }
 
@@ -214,7 +222,7 @@ function Appearance() {
 }
 
 function General({ principal }: { principal: Principal }) {
-  const { editable } = useWorkspace()
+  const { editable, billing } = useWorkspace()
   return (
     <>
       <Heading title="General" />
@@ -230,7 +238,13 @@ function General({ principal }: { principal: Principal }) {
               : "Only you and your agents edit. Others can view through a share link."
           }
         >
-          <span className="text-text">{principal.plan === "team" ? "Team" : "Free"}</span>
+          {billing ? (
+            <Link to="/settings/{-$section}" params={{ section: "billing" }} className="text-text hover:underline">
+              {principal.plan === "team" ? "Team" : "Free"}
+            </Link>
+          ) : (
+            <span className="text-text">{principal.plan === "team" ? "Team" : "Free"}</span>
+          )}
         </Row>
         {editable && (
           <Row label="Archived" help="Hidden from the workspace, agents and share links until restored.">

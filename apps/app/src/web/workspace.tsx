@@ -17,6 +17,8 @@ type Workspace = {
   signInProblem: string | null
   /** What the server says about sign-in: "dev" is a local server with none. Undefined until the first read. */
   authMode: "dev" | "live" | undefined
+  /** This server bills (Cloud): Settings shows Billing. */
+  billing: boolean
   editable: boolean
   artifacts: Artifact[]
   folders: Folder[]
@@ -121,6 +123,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [principal, setPrincipal] = useState<Principal | null>(null)
   const [authMode, setAuthMode] = useState<"dev" | "live" | undefined>(undefined)
+  const [billing, setBilling] = useState(false)
   const session = useSession()
   const [signInProblem, setSignInProblem] = useState<string | null>(null)
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
@@ -211,6 +214,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         setPrincipal(snap.principal)
         setAuthMode(snap.authMode)
+        setBilling(snap.billing === true)
         setArtifacts([...snap.artifacts])
         setFolders([...snap.folders])
         // Here, not in the viewer effect below: the sidebar expands the open folder as soon as it
@@ -495,6 +499,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       account: session.status === "signed-in" ? session.info : null,
       signInProblem,
       authMode,
+      billing,
       editable: principal ? canEdit(principal) : false,
       artifacts,
       folders,
@@ -521,7 +526,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       recordVisit,
       loadContent,
     }),
-    [status, error, principal, session, signInProblem, authMode, artifacts, folders, create, rename, remove, archive, restore, loadArchived, loadDirectory, createFolder, updateFolder, removeFolder, moveArtifact, fail, openFolders, toggleFolder, expandFolders, devAs, setDevAs, starred, toggleStar, visits, recordVisit, loadContent],
+    [status, error, principal, session, signInProblem, authMode, billing, artifacts, folders, create, rename, remove, archive, restore, loadArchived, loadDirectory, createFolder, updateFolder, removeFolder, moveArtifact, fail, openFolders, toggleFolder, expandFolders, devAs, setDevAs, starred, toggleStar, visits, recordVisit, loadContent],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

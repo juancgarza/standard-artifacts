@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react"
 import { Effect } from "effect"
+import { Link } from "@tanstack/react-router"
 import { EnvelopeSimpleIcon, KeyIcon } from "@phosphor-icons/react"
 import type { ApiToken, CreatedApiToken, OrgInvitation, OrgMember, OrgMembers, Principal, Role } from "@standard-artifacts/protocol"
 import { api, errorMessage } from "../api"
@@ -13,17 +14,39 @@ import { useWorkspace } from "../workspace"
  * WorkOS in Cloud) and your access tokens for the CLI and MCP.
  */
 
-type Client = Effect.Success<ReturnType<typeof api>>
+export type Client = Effect.Success<ReturnType<typeof api>>
 
-/** Run a typed API call; failures reject with a readable message. */
-function useApi() {
+/** A failed API call: a readable message, and the error's tag (`UpgradeRequired`…) when it had one. */
+export class ApiFailure extends Error {
+  readonly tag: string | undefined
+  constructor(e: unknown) {
+    super(errorMessage(e))
+    this.tag = typeof e === "object" && e !== null && "_tag" in e && typeof e._tag === "string" ? e._tag : undefined
+  }
+}
+
+/** Run a typed API call; failures reject with an ApiFailure. */
+export function useApi() {
   const { devAs } = useWorkspace()
   return useCallback(
-    <A,>(f: (client: Client) => Effect.Effect<A, unknown>) =>
-      Effect.runPromise(api(devAs).pipe(Effect.flatMap(f), Effect.mapError((e) => new Error(errorMessage(e))))),
+    <A,>(f: (client: Client) => Effect.Effect<A, unknown>) => Effect.runPromise(api(devAs).pipe(Effect.flatMap(f), Effect.mapError((e) => new ApiFailure(e)))),
     [devAs],
   )
 }
+
+/** The plan doesn't cover an Editor or Owner: say why, and where to upgrade. */
+function UpgradePrompt({ message }: { message: string }) {
+  return (
+    <div role="alert" className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-[13px]">
+      <p className="text-text">{message}</p>
+      <Link to="/settings/{-$section}" params={{ section: "billing" }} className="mt-1.5 inline-flex font-medium text-accent hover:underline">
+        See plans and upgrade
+      </Link>
+    </div>
+  )
+}
+
+const isUpgrade = (e: unknown) => e instanceof ApiFailure && e.tag === "UpgradeRequired"
 
 const button = "flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-[13px] font-medium text-text hover:bg-hover disabled:opacity-50"
 const danger = "flex h-7 shrink-0 items-center rounded-md px-2.5 text-[13px] font-medium text-danger hover:bg-hover disabled:opacity-50"
@@ -126,7 +149,7 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<Role>("editor")
   const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null)
+  const [note, setNote] = useState<{ ok: boolean; text: string; upgrade?: boolean } | null>(null)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -139,7 +162,7 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
       setNote({ ok: true, text: `Invitation sent to ${sent.email}.` })
       await onInvited()
     } catch (err) {
-      setNote({ ok: false, text: (err as Error).message })
+      setNote({ ok: false, text: (err as Error).message, upgrade: isUpgrade(err) })
     }
     setBusy(false)
   }
@@ -159,10 +182,14 @@ function Invite({ onInvited }: { onInvited: () => Promise<void> }) {
       <button type="submit" disabled={busy || !email.trim()} className="flex h-8 items-center gap-1.5 rounded-md bg-accent px-3 text-[13px] font-medium text-accent-text disabled:opacity-50">
         <EnvelopeSimpleIcon size={14} /> {busy ? "Sending…" : "Invite"}
       </button>
-      {note && (
-        <p role={note.ok ? "status" : "alert"} className={`w-full text-[13px] ${note.ok ? "text-muted" : "text-danger"}`}>
-          {note.text}
-        </p>
+      {note?.upgrade ? (
+        <UpgradePrompt message={note.text} />
+      ) : (
+        note && (
+          <p role={note.ok ? "status" : "alert"} className={`w-full text-[13px] ${note.ok ? "text-muted" : "text-danger"}`}>
+            {note.text}
+          </p>
+        )
       )}
     </form>
   )
@@ -172,7 +199,7 @@ function MemberRow({ member, you, canManage, lastOwner, onChanged }: { member: O
   const run = useApi()
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ text: string; upgrade: boolean } | null>(null)
 
   const act = async (f: (c: Client) => Effect.Effect<unknown, unknown>) => {
     setBusy(true)
@@ -183,7 +210,7 @@ function MemberRow({ member, you, canManage, lastOwner, onChanged }: { member: O
       if (you && confirming) return window.location.assign("/")
       await onChanged()
     } catch (e) {
-      setError((e as Error).message)
+      setError({ text: (e as Error).message, upgrade: isUpgrade(e) })
     }
     setBusy(false)
     setConfirming(false)
@@ -233,11 +260,16 @@ function MemberRow({ member, you, canManage, lastOwner, onChanged }: { member: O
           <span title="Owners choose roles">{roles[member.role].label}</span>
         )}
       </Item>
-      {error && (
-        <p role="alert" className="pb-2 text-[13px] text-danger">
-          {error}
-        </p>
-      )}
+      {error &&
+        (error.upgrade ? (
+          <div className="pb-2">
+            <UpgradePrompt message={error.text} />
+          </div>
+        ) : (
+          <p role="alert" className="pb-2 text-[13px] text-danger">
+            {error.text}
+          </p>
+        ))}
     </>
   )
 }
