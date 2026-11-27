@@ -11,6 +11,7 @@
     "typecheck": "pnpm -r typecheck",
     "cli": "pnpm --filter stdartifacts build",
     "test": "scripts/test.sh",
-    "pack-check": "node scripts/pack-check.mjs"
+    "pack-check": "node scripts/pack-check.mjs",
+    "smoke": "node scripts/smoke.mjs"
   }
 }

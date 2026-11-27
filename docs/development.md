@@ -53,6 +53,20 @@ pnpm test                                   # everything
 cd tests && node --test src/board.*.test.ts # one area
 ```
 
+## Smoke test
+
+`pnpm smoke [url]` checks a hosted server (staging, prod, or any live-mode deploy) end to end, with an access token from Settings → Access tokens: auth (no token, garbage and forged tokens, and that a token can't mint tokens, manage members or make share links), create/write/read/delete for each kind, live sync on a room socket, remote MCP over HTTP and `stdartifacts mcp` over stdio, image assets, and a hosted `@claude` run. It prints one PASS, FAIL or SKIP line per check with its time, and exits non-zero if any check fails.
+
+```sh
+SMOKE_URL=https://staging.standardartifacts.com SMOKE_TOKEN=sat_… pnpm smoke
+```
+
+- **Config.** `SMOKE_URL` and `SMOKE_TOKEN` come from the environment, or from `.env.local` in the repo root (gitignored). The URL argument overrides `SMOKE_URL`. The token is never printed.
+- **What it leaves behind.** Nothing. Everything it makes is titled `smoke-<timestamp> …` and goes in a `smoke` folder. It's all deleted at the end, even after a failure or Ctrl-C, and the last check confirms the workspace no longer lists any of it. Leftovers of a killed run that are over an hour old are swept up on the next run. Deleting an artifact deletes its mentions too.
+- **The agent run** spends model credit and takes a couple of minutes, because the container starts cold. `SMOKE_SKIP_AGENT=1` skips it, and `SMOKE_AGENT_TIMEOUT_MS` (default 6 minutes) sets how long to wait. When the run fails, the check prints the error the run reported.
+- **stdio MCP** uses `apps/cli/dist/stdartifacts.mjs`, and builds it (`pnpm cli`) if it's missing.
+- **Not covered.** Revoking a token, because tokens are only made from a signed-in browser session, never with another token. Browser tickets (`?ticket=`), which need that session too: sockets are opened with the access token as a bearer header instead.
+
 ## Releasing
 
 Five packages go to npm: `@standard-artifacts/protocol`, `client`, `mcp` and `server`, and the `stdartifacts` CLI. `pnpm pack-check` packs them, installs the tarballs into a fresh project and checks that they import, run and typecheck.
