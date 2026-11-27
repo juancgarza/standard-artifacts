@@ -246,7 +246,7 @@ const refused = (request: Request, exit: Exit.Exit<unknown, Refusal>) =>
     if (error._tag === "Forbidden") return rpcError(403, -32003, error.message)
     if (error._tag === "Unavailable") return rpcError(503, -32603, error.message, { "retry-after": "30" })
     const challenge = oauth.enabled
-      ? `Bearer resource_metadata="${oauth.origin(request)}/.well-known/oauth-protected-resource/mcp"${sent ? `, error="invalid_token", error_description="${error.message.replace(/["\\]/g, "")}"` : ""}`
+      ? `Bearer resource_metadata="${oauth.origin(request)}/.well-known/oauth-protected-resource/mcp"${sent ? `, error="invalid_token", error_description="${error.message.replace(/[^\x20-\x7e]|["\\]/g, "")}"` : ""}`
       : 'Bearer realm="standard-artifacts"'
     const message = oauth.enabled
       ? sent
