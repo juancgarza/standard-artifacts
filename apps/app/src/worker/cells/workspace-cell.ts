@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers"
 import type { Env } from "../env"
 import { TRIAL_HOSTED_RUNS, WAITING_MENTION_MAX_AGE_MS, billingOn, expiredMentionMessage, hostedRuns, hostedRunsMessage, runnerRole, statusOf, type HostedRuns } from "../plans"
 import { runnerEnabled, type RunOutcome } from "./runner-cell"
+import { GrantStore, type Grant, type PendingCode, type Refreshed, type Taken } from "./grants"
 import {
   canEdit,
   folderProblem,
@@ -927,6 +928,61 @@ export class WorkspaceCell extends DurableObject<Env> {
     this.sql.exec("UPDATE api_tokens SET role = ?, checked_at = ? WHERE user_id = ?", role, Date.now(), userId)
   }
 
+  // --- OAuth grants (remote MCP clients; see oauth.ts and grants.ts) ---------------------------
+
+  private grantStore: GrantStore | undefined
+  private grants() {
+    return (this.grantStore ??= new GrantStore(this.sql))
+  }
+
+  putOAuthCode(hash: string, code: PendingCode): void {
+    this.grants().putCode(hash, code, nowS())
+  }
+
+  takeOAuthCode(hash: string): Taken {
+    return this.grants().takeCode(hash, nowS())
+  }
+
+  /** The grant a redeemed code makes. (Approving touched this cell as the person, so it knows its org.) */
+  createOAuthGrant(input: { codeHash: string; id: string; code: PendingCode; accessHash: string; refreshHash: string }): Grant | null {
+    return this.grants().createGrant({ ...input, now: nowS() })
+  }
+
+  /** An access token's grant and the org, for the Worker's auth. Null when the token is unknown, expired or revoked. */
+  resolveOAuthToken(hash: string): { grant: Grant; expiresAt: number; orgId: string; orgName: string; plan: Principal["plan"] } | null {
+    const found = this.grants().resolveAccess(hash, nowS())
+    const org = this.org()
+    return found && org ? { ...found, ...org } : null
+  }
+
+  refreshOAuthToken(hash: string, clientId: string, next: { accessHash: string; refreshHash: string }): Refreshed {
+    return this.grants().refresh(hash, clientId, next, nowS())
+  }
+
+  revokeOAuthToken(hash: string): boolean {
+    return this.grants().revokeToken(hash)
+  }
+
+  /** The account service confirmed a person's role, or said they left ("removed"). */
+  oauthRoleChecked(userId: string, role: string): void {
+    this.grants().roleChecked(userId, role, Date.now())
+  }
+
+  /** Live grants: everyone's for an owner, otherwise the caller's own. Only people see them. */
+  listOAuthGrants(p: Principal): CellResult<Array<Grant>> {
+    if (p.actor.type !== "user") return { ok: false, reason: "forbidden", error: "Only people can see connected agents" }
+    return { ok: true, value: this.grants().list(p.role === "owner" ? null : p.actor.id, nowS()) }
+  }
+
+  /** Disconnect an agent: its next request is refused. Owners may disconnect anyone's; others only their own. */
+  revokeOAuthGrant(p: Principal, id: string): CellResult<null> {
+    if (p.actor.type !== "user") return { ok: false, reason: "forbidden", error: "Only people can disconnect agents" }
+    const grant = this.grants().get(id)
+    if (!grant || (grant.userId !== p.actor.id && p.role !== "owner")) return notFound()
+    this.grants().revokeGrant(id)
+    return { ok: true, value: null }
+  }
+
   /**
    * Resolve a share token (for the Worker's auth). Null when it was turned off or its artifact is gone.
    * The plan is the org's now, not when the link was made (the row's `plan` is only a fallback).
@@ -959,6 +1015,8 @@ type LinkRow = { token: string; artifact_id: string; role: "viewer"; created_by:
 const toLink = (r: LinkRow): ShareLink => ({ token: r.token, path: sharePath(r.token), role: r.role, createdBy: r.created_by, createdAt: r.created_at })
 
 const b64url = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+
+const nowS = () => Math.floor(Date.now() / 1000)
 
 const SETTLE_MS = 3000
 const LEASE_MS = 10 * 60 * 1000

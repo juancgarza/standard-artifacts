@@ -48,8 +48,8 @@ function UpgradePrompt({ message }: { message: string }) {
 
 const isUpgrade = (e: unknown) => e instanceof ApiFailure && e.tag === "UpgradeRequired"
 
-const button = "flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-[13px] font-medium text-text hover:bg-hover disabled:opacity-50"
-const danger = "flex h-7 shrink-0 items-center rounded-md px-2.5 text-[13px] font-medium text-danger hover:bg-hover disabled:opacity-50"
+export const button = "flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-[13px] font-medium text-text hover:bg-hover disabled:opacity-50"
+export const danger = "flex h-7 shrink-0 items-center rounded-md px-2.5 text-[13px] font-medium text-danger hover:bg-hover disabled:opacity-50"
 const input = "h-8 min-w-0 rounded-md border border-border bg-bg px-2.5 text-[13px] text-text outline-none placeholder:text-faint focus:border-accent"
 
 function RoleSelect({ value, onChange, disabled, label }: { value: Role; onChange: (r: Role) => void; disabled?: boolean; label: string }) {
@@ -71,7 +71,7 @@ function RoleSelect({ value, onChange, disabled, label }: { value: Role; onChang
 }
 
 /** A row in a settings list: picture, two lines, then whatever goes on the right. */
-function Item({ avatar, title, detail, children }: { avatar: ReactNode; title: ReactNode; detail: ReactNode; children?: ReactNode }) {
+export function Item({ avatar, title, detail, children }: { avatar: ReactNode; title: ReactNode; detail: ReactNode; children?: ReactNode }) {
   return (
     <li className="flex min-h-13 flex-wrap items-center gap-x-3 gap-y-2 py-2">
       {avatar}

@@ -42,6 +42,8 @@ env = { STDARTIFACTS_URL = "http://localhost:4747" }
 
 **ChatGPT** and **Claude** connectors need a public HTTPS server with sign-in. Use [Standard Artifacts Cloud](#solo-or-cloud), or see [CLI and MCP](docs/cli-and-mcp.md#remote-mcp-codex-chatgpt) for a dev tunnel. A tunnel exposes your workspace to anyone with the URL.
 
+**On Cloud**, every client connects by URL alone: add `https://app.standardartifacts.com/mcp` to Claude, ChatGPT, Codex, Claude Code, Cursor or VS Code, and sign in in your browser. You pick the workspace and whether the agent may edit or only read, and you can disconnect it anytime. **Settings → Connections** has the exact steps for each app; so does [Connect an agent](docs/cli-and-mcp.md#connect-an-agent).
+
 **Scripts:** everything is plain HTTP (`GET /api/v1/artifacts/:id/content`, `POST …/ops`), wrapped by the typed [`@standard-artifacts/client`](packages/client).
 
 </details>

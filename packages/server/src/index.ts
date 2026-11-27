@@ -63,7 +63,7 @@ export async function serve(options: ServeOptions = {}): Promise<RunningServer> 
     // workerd aborts noisily on a taken port, so check first.
     if (port !== 0 && !(await portFree(port))) throw new Error(`Port ${port} is in use. Pick another with --port.`)
 
-    const cells = { WORKSPACE: "WorkspaceCell", TABLE: "TableCell", BOARD: "BoardCell", DOC: "DocCell", TRACKER: "TrackerCell", MCP: "McpCell" }
+    const cells = { WORKSPACE: "WorkspaceCell", TABLE: "TableCell", BOARD: "BoardCell", DOC: "DocCell", TRACKER: "TrackerCell", MCP: "McpCell", OAUTH: "OAuthCell" }
     const optional = (key: string) => (process.env[key] ? { [key]: process.env[key] } : {})
 
     mf = new Miniflare({
@@ -88,8 +88,8 @@ export async function serve(options: ServeOptions = {}): Promise<RunningServer> 
       durableObjectsPersist: join(dataDir, "do"),
       assets: {
         directory: assets,
-        // As wrangler.jsonc: the SPA, with the Worker first for /api/* and /mcp.
-        routerConfig: { has_user_worker: true, invoke_user_worker_ahead_of_assets: false, static_routing: { user_worker: ["/api/*", "/mcp"] } },
+        // As wrangler.jsonc: the SPA, with the Worker first for /api/*, /mcp and OAuth discovery.
+        routerConfig: { has_user_worker: true, invoke_user_worker_ahead_of_assets: false, static_routing: { user_worker: ["/api/*", "/mcp", "/mcp/*", "/.well-known/oauth-*"] } },
         assetConfig: { not_found_handling: "single-page-application", has_static_routing: true },
       },
     })

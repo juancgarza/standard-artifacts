@@ -57,7 +57,7 @@ export async function startLive(
     ...(options.runner && { ANTHROPIC_API_KEY: "test-anthropic-key" }),
     ...bindings,
   }
-  const cells: Record<string, string> = { WORKSPACE: "WorkspaceCell", TABLE: "TableCell", BOARD: "BoardCell", DOC: "DocCell", TRACKER: "TrackerCell", MCP: "McpCell" }
+  const cells: Record<string, string> = { WORKSPACE: "WorkspaceCell", TABLE: "TableCell", BOARD: "BoardCell", DOC: "DocCell", TRACKER: "TrackerCell", MCP: "McpCell", OAUTH: "OAuthCell" }
   if (options.runner) cells.RUNNER = "RunnerCell"
   const mf = new Miniflare({
     name: "standard-artifacts-live-test",
@@ -73,7 +73,7 @@ export async function startLive(
     ...(options.persist && { durableObjectsPersist: options.persist }),
     assets: {
       directory: `${dist}assets`,
-      routerConfig: { has_user_worker: true, invoke_user_worker_ahead_of_assets: false, static_routing: { user_worker: ["/api/*", "/mcp"] } },
+      routerConfig: { has_user_worker: true, invoke_user_worker_ahead_of_assets: false, static_routing: { user_worker: ["/api/*", "/mcp", "/mcp/*", "/.well-known/oauth-*"] } },
       assetConfig: { not_found_handling: "single-page-application", has_static_routing: true },
     },
   })

@@ -2,6 +2,7 @@ import { Context } from "effect"
 import type { BoardCell } from "./cells/board-cell"
 import type { DocCell } from "./cells/doc-cell"
 import type { McpCell } from "./cells/mcp-cell"
+import type { OAuthCell } from "./cells/oauth-cell"
 import type { RunnerCell } from "./cells/runner-cell"
 import type { TrackerCell } from "./cells/tracker-cell"
 import type { TableCell } from "./cells/table-cell"
@@ -19,6 +20,8 @@ export interface Env {
   readonly TRACKER: DurableObjectNamespace<TrackerCell>
   /** Remote MCP sessions, one cell per principal. */
   readonly MCP: DurableObjectNamespace<McpCell>
+  /** Remote MCP sign-in (OAuth): registered clients, consent requests and rate limits, in one instance. Grants live in each org's WORKSPACE cell. */
+  readonly OAUTH: DurableObjectNamespace<OAuthCell>
   /** Hosted agent runs (Cloudflare containers). Absent in dev and on celld, where `stdartifacts agent serve` does this. */
   readonly RUNNER?: DurableObjectNamespace<RunnerCell>
   /** The model key for hosted runs. Stays in the Worker; containers never see it. */

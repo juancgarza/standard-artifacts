@@ -160,6 +160,32 @@ export function signIn(options: { readonly returnTo?: string; readonly screen?: 
   window.location.assign(`/api/auth/login?${q}`)
 }
 
+const AFTER_SIGN_IN = "standard-artifacts:after-sign-in"
+
+/**
+ * "Not you?" on the consent page signs out all the way (AuthKit too), which
+ * lands on the app's front page. Remember the consent page, so signing in
+ * again from there goes straight back to it. Only consent pages qualify.
+ */
+export function rememberAfterSignIn(path: string) {
+  try {
+    if (/^\/authorize\?request=req_[\w-]+$/.test(path)) sessionStorage.setItem(AFTER_SIGN_IN, path)
+  } catch {
+    // storage blocked: they start again from their app
+  }
+}
+
+/** Where to land after the next sign-in, once (see rememberAfterSignIn). */
+export function takeAfterSignIn(): string | undefined {
+  try {
+    const path = sessionStorage.getItem(AFTER_SIGN_IN)
+    sessionStorage.removeItem(AFTER_SIGN_IN)
+    return path && /^\/authorize\?request=req_[\w-]+$/.test(path) ? path : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export async function signOut() {
   clearTimeout(timer)
   const res = await post("/api/auth/logout").catch(() => null)

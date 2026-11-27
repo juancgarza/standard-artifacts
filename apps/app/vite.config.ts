@@ -9,7 +9,7 @@ const api = process.env.API_URL ?? "http://localhost:1337"
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    proxy: { "/api": { target: api, ws: true, changeOrigin: true }, "/mcp": { target: api, changeOrigin: true } },
+    proxy: { "/api": { target: api, ws: true, changeOrigin: true }, "/mcp": { target: api, changeOrigin: true }, "/.well-known/oauth-": { target: api, changeOrigin: true } },
     // Cells write their SQLite under .alchemy on every op; watching it would reload the page on each edit.
     watch: { ignored: ["**/.alchemy/**", "**/dist/**"] },
   },

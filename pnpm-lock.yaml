@@ -361,6 +361,9 @@ importers:
 
   tests:
     devDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.2
+        version: 1.32.2(zod@4.6.7)
       '@types/node':
         specifier: ^24
         version: 24.19.2

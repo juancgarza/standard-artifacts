@@ -9,6 +9,7 @@ export { BoardCell } from "./cells/board-cell"
 export { DocCell } from "./cells/doc-cell"
 export { TrackerCell } from "./cells/tracker-cell"
 export { McpCell } from "./cells/mcp-cell"
+export { OAuthCell } from "./cells/oauth-cell"
 export { RunnerCell, RunnerOutbound } from "./cells/runner-cell"
 
 export default {

@@ -51,9 +51,13 @@ describe("settings", () => {
     await main.getByText("(you)").waitFor()
 
     await nav.getByRole("link", { name: "Agents" }).click()
+    // Agents points at Connections, where agents get connected.
+    await main.getByText(/To connect Claude, ChatGPT/).getByRole("link", { name: "Connections" }).click()
+    await page.waitForURL(`${BASE}/settings/connections`)
     await main.getByRole("heading", { name: "Connect an agent" }).waitFor()
-    await main.getByText(`claude mcp add --transport http stdartifacts ${BASE}/mcp`).waitFor()
-    await main.getByText(`codex mcp add stdartifacts --url ${BASE}/mcp`).waitFor()
+    assert.equal(await main.getByRole("textbox", { name: "MCP server URL" }).inputValue(), `${BASE}/mcp`)
+    await main.getByText(`claude mcp add --transport http standard-artifacts ${BASE}/mcp`).waitFor()
+    await main.getByText(`codex mcp add standard-artifacts --url ${BASE}/mcp`).waitFor()
 
     assert.equal(await tabs.count(), before, "sections move within the tab")
     await tabs.getByText("Settings").waitFor()
@@ -115,10 +119,10 @@ describe("settings", () => {
 
   test("phone width: the section nav scrolls instead of pushing the page sideways", async () => {
     const { page, errors } = await open(browser, "owner", { width: 390, height: 780 })
-    await visit(page, `${BASE}/settings/agents`, page.locator("main").getByRole("heading", { name: "Connect an agent" }))
+    await visit(page, `${BASE}/settings/connections`, page.locator("main").getByRole("heading", { name: "Connect an agent" }))
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     assert.equal(overflow, 0)
-    const current = await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Agents" }).boundingBox()
+    const current = await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Connections" }).boundingBox()
     assert.ok(current && current.x >= 0 && current.x + current.width <= 390, "the current section is scrolled into view")
     assert.deepEqual(errors, [])
   })

@@ -213,7 +213,12 @@ export const Principal = Schema.Struct({
 })
 export interface Principal extends Schema.Schema.Type<typeof Principal> {}
 
-export const Ticket = Principal.pipe(Schema.fieldsAssign({ exp: Schema.Int }))
+/**
+ * A ticket is a principal plus when it expires. `via: "grant"` marks one the
+ * Worker minted for an agent signed in with OAuth (remote MCP): it carries the
+ * same limits as an access token (no share links, no member changes).
+ */
+export const Ticket = Principal.pipe(Schema.fieldsAssign({ exp: Schema.Int, via: Schema.optionalKey(Schema.Literal("grant")) }))
 export interface Ticket extends Schema.Schema.Type<typeof Ticket> {}
 
 export class CurrentPrincipal extends Context.Service<CurrentPrincipal, Principal>()("@standard-artifacts/CurrentPrincipal") {}
