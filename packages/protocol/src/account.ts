@@ -115,3 +115,49 @@ export type SessionInfo = typeof SessionInfo.Type
 /** An org the signed-in person belongs to, for the switcher (`GET /api/auth/orgs`). */
 export const SessionOrgChoice = Schema.Struct({ id: Schema.String, name: Schema.String, role: Role, current: Schema.Boolean })
 export interface SessionOrgChoice extends Schema.Schema.Type<typeof SessionOrgChoice> {}
+
+// --- Billing (Standard Artifacts Cloud) ----------------------------------------------------
+
+/**
+ * Where an org's Team subscription stands, mirrored from Stripe. `none`: never
+ * subscribed (or billing is off). Only `trialing` and `active` are Team; past
+ * due and paused fall back to Free limits until they're fixed, and nothing is
+ * ever deleted.
+ */
+export const BillingStatus = Schema.Literals(["none", "trialing", "active", "past_due", "paused", "canceled", "incomplete"])
+export type BillingStatus = typeof BillingStatus.Type
+
+export const BillingInterval = Schema.Literals(["month", "year"])
+export type BillingInterval = typeof BillingInterval.Type
+
+/** Team, per paid seat (Owners and Editors) a month, in US dollars. Viewers, agents and tokens are free. */
+export const TEAM_PRICE = { month: 12, year: 10 } as const
+/** Days of Team, with no card, before it pauses back to Free limits. */
+export const TRIAL_DAYS = 14
+
+/** The org's plan and subscription, for Settings → Billing. */
+export const BillingInfo = Schema.Struct({
+  /** False on a server without Stripe (self-hosted, dev): every workspace works as it always has. */
+  enabled: Schema.Boolean,
+  plan: Plan,
+  status: BillingStatus,
+  interval: Schema.NullOr(BillingInterval),
+  /** Seats the subscription bills for. */
+  seats: Schema.Int,
+  /** Owners and Editors in the org right now. */
+  paidMembers: Schema.Int,
+  /** When the trial ends (ISO), while trialing. */
+  trialEndsAt: Schema.NullOr(Schema.String),
+  /** Whether starting Team comes with the free trial (once per workspace). */
+  trialAvailable: Schema.Boolean,
+  /** Owners start Checkout and open the billing portal. */
+  canManage: Schema.Boolean,
+})
+export interface BillingInfo extends Schema.Schema.Type<typeof BillingInfo> {}
+
+export const StartCheckout = Schema.Struct({ interval: BillingInterval })
+export interface StartCheckout extends Schema.Schema.Type<typeof StartCheckout> {}
+
+/** Where to send the browser: Stripe Checkout or the customer portal. */
+export const BillingRedirect = Schema.Struct({ url: Schema.String })
+export interface BillingRedirect extends Schema.Schema.Type<typeof BillingRedirect> {}
