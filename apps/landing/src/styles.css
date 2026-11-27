@@ -267,7 +267,10 @@ details[open] .pm::after{transform:rotate(0)}
 .pitch::before{content:"";position:absolute;inset:0 auto auto 0;width:100%;height:100%;z-index:-1;background:radial-gradient(ellipse max(620px,50.8cqw) max(360px,29.5cqw) at 26.2cqw 13.9cqw,light-dark(#fffc,#0000) 25%,#fff0)}
 .pitch h2{font-size:clamp(44px,5.57cqw,84px);line-height:1.04;letter-spacing:-.02em;margin:0 0 28px;color:inherit;text-shadow:0 2px 24px var(--paint-shade)}
 .go{display:flex;flex-wrap:wrap;gap:12px}
-.foot{position:relative;padding:36px var(--gutter) 22px;color:var(--on);font-size:14px}
+.foot{position:relative;isolation:isolate;padding:36px var(--gutter) 22px;color:var(--on);font-size:14px}
+/* The brand pattern: a border of Talavera tiles, and the same tile in one colour as a faint watermark behind the footer. */
+.tiles{height:40px;margin:0 0 34px;background:url(./brand/pattern.svg) 0 0/40px 40px repeat-x;border-radius:4px;box-shadow:0 10px 24px -14px #0006}
+.foot::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:currentColor;opacity:.07;-webkit-mask:url(./brand/watermark.svg) 0 0/56px 56px repeat,linear-gradient(#0000,#000 220px);-webkit-mask-composite:source-in;mask:url(./brand/watermark.svg) 0 0/56px 56px repeat,linear-gradient(#0000,#000 220px);mask-composite:intersect}
 .cols{display:flex;flex-wrap:wrap;gap:24px 96px}
 .cols nav{display:grid;gap:5px;align-content:start}
 .cols .nav-h{color:inherit;opacity:.75;margin:0 0 3px}

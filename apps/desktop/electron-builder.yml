@@ -2,6 +2,8 @@ appId: com.standardartifacts.desktop
 productName: Standard Artifacts
 directories:
   output: release
+  # icon.png (1024px, from scripts/brand.mjs): electron-builder makes the .icns and .ico from it.
+  buildResources: build
 # No spaces, so release downloads keep their names: Standard-Artifacts-0.1.0-mac-arm64.dmg.
 artifactName: Standard-Artifacts-${version}-${os}-${arch}.${ext}
 files:
@@ -20,13 +22,16 @@ electronFuses:
   onlyLoadAppFromAsar: true
   grantFileProtocolExtraPrivileges: false
 mac:
+  icon: build/icon.png
   category: public.app-category.productivity
   hardenedRuntime: true
   target:
     - target: dmg
       arch: [arm64, x64]
 win:
+  icon: build/icon.png
   target: nsis
 linux:
+  icon: build/icon.png
   category: Office
   target: AppImage

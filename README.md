@@ -1,3 +1,5 @@
+<img src="assets/brand/mark.svg" width="56" height="56" alt="">
+
 # Standard Artifacts
 
 **Open-source artifacts that you and your agents work on together.**

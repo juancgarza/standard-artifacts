@@ -1,16 +1,9 @@
 import { WarningIcon } from "@phosphor-icons/react"
 import { signIn } from "../session"
 
-/** The four artifact kinds, as on the landing page. */
+/** The Talavera tile (assets/brand), served as the favicon. */
 function Mark() {
-  return (
-    <svg viewBox="0 0 22 22" width="36" height="36" aria-hidden="true">
-      <rect width="10" height="10" rx="2" fill="var(--table)" />
-      <rect x="12" width="10" height="10" rx="2" fill="var(--board)" />
-      <rect y="12" width="10" height="10" rx="2" fill="var(--doc)" />
-      <rect x="12" y="12" width="10" height="10" rx="2" fill="var(--tracker)" />
-    </svg>
-  )
+  return <img src="/favicon.svg" width={36} height={36} alt="" />
 }
 
 /**
