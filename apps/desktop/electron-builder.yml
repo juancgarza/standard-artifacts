@@ -2,6 +2,8 @@ appId: com.standardartifacts.desktop
 productName: Standard Artifacts
 directories:
   output: release
+# No spaces, so release downloads keep their names: Standard-Artifacts-0.1.0-mac-arm64.dmg.
+artifactName: Standard-Artifacts-${version}-${os}-${arch}.${ext}
 files:
   - dist/**
   - package.json

@@ -1,0 +1,179 @@
+name: Desktop release
+
+# Builds the desktop app's installers (macOS dmg for Apple silicon and Intel, Windows NSIS,
+# Linux AppImage) and attaches them to a GitHub pre-release, "Desktop preview v<version>".
+# Bump apps/desktop/package.json in a PR, merge it, then push a desktop-v<version> tag, or run
+# this from the Actions tab with the version (it tags the chosen commit if the tag is new).
+#
+# Signing. Until these repository secrets exist the builds are unsigned: macOS ad-hoc signed
+# and not notarized, Windows unsigned (docs/desktop.md has the first-open steps). Adding them
+# turns signing on, with no change here:
+#   CSC_LINK, CSC_KEY_PASSWORD   a Developer ID Application certificate (.p12, base64) and its password
+#   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID   notarization (electron-builder notarizes when all three are set)
+#   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD   optional: a Windows code-signing certificate
+#
+# Auto-update is left out on purpose: on macOS it needs a signed app (Squirrel.Mac checks the
+# signature). Once signing is on, add electron-updater with GitHub as the provider and publish
+# its latest*.yml files alongside the installers.
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, as in apps/desktop/package.json (e.g. 0.1.0)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Check the version matches the app's
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version="${INPUT_VERSION#v}"; fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::\"$version\" isn't a version like 0.1.0"
+            exit 1
+          fi
+          expected=$(node -p "require('./apps/desktop/package.json').version")
+          if [ "$version" != "$expected" ]; then
+            echo "::error::desktop-v$version doesn't match apps/desktop/package.json ($expected). Bump it in a PR first."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=desktop-v$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+            files: apps/desktop/release/*.dmg
+          - os: windows-latest
+            platform: win
+            files: apps/desktop/release/*.exe
+          - os: ubuntu-latest
+            platform: linux
+            files: apps/desktop/release/*.AppImage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the installers
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          # Each is empty until its secret exists. A Mac certificate never reaches the Windows build.
+          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          WIN_CSC_LINK: ${{ matrix.platform == 'win' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+        run: |
+          set -euo pipefail
+          # electron-builder treats a variable that's set but empty as set: drop the empty ones.
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then unset "$name"; fi
+          done
+          args=(--"$PLATFORM" --publish never)
+          if [ "$PLATFORM" = "mac" ]; then
+            if [ -n "${CSC_LINK:-}" ]; then
+              if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+                echo "::notice::Signing with the Developer ID certificate and notarizing"
+              else
+                echo "::warning::Signing with the Developer ID certificate, but not notarizing: set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID"
+              fi
+            else
+              echo "::notice::No CSC_LINK secret: ad-hoc signed and not notarized (see docs/desktop.md for first-open steps)"
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+              args+=(-c.mac.identity=-)
+            fi
+          fi
+          # The packaged app loads app.standardartifacts.com, whatever this runner's environment says.
+          unset STDARTIFACTS_DESKTOP_URL
+          pnpm build
+          pnpm exec electron-builder "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cat > notes.md <<EOF
+          A preview of the Standard Artifacts desktop app for [Standard Artifacts Cloud](https://app.standardartifacts.com). It isn't signed yet, so your OS will warn you the first time you open it.
+
+          **macOS** (Apple silicon: \`mac-arm64.dmg\`, Intel: \`mac-x64.dmg\`). Open the dmg and drag Standard Artifacts to Applications. The first time you open it, macOS says it can't check the app for malicious software:
+          - macOS Sequoia and later: open it once, then go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to the message about Standard Artifacts.
+          - Or, in Terminal: \`xattr -dr com.apple.quarantine "/Applications/Standard Artifacts.app"\`
+
+          **Windows** (\`win-x64.exe\`). If SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**.
+
+          **Linux** (\`linux-x86_64.AppImage\`). \`chmod +x\` the file and run it.
+
+          Sign in from the app: it opens sign-in in your browser and comes back to the app when you're done. The app doesn't update itself yet; download new previews from [Releases](https://github.com/${GITHUB_REPOSITORY}/releases). \`SHA256SUMS.txt\` has each file's checksum.
+
+          Version ${VERSION}, built from ${GITHUB_SHA}.
+          EOF
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # A re-run: replace the files, keep the release.
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            # A new tag is made at the commit this ran on (from workflow_dispatch); an existing one is kept.
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --prerelease --latest=false --title "Desktop preview v$VERSION" --notes-file notes.md
+          fi
