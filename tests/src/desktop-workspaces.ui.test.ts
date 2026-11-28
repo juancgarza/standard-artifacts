@@ -57,7 +57,9 @@ describe("desktop workspaces: this computer (Solo)", () => {
   let data: string
   before(async () => {
     data = mkdtempSync(join(tmpdir(), "sa-desktop-ws-"))
-    const { serve } = (await import("../../packages/server/dist/index.mjs")) as typeof import("../../packages/server/src/index.ts")
+    // The built server (`pnpm test` builds it first), by URL so typechecking doesn't need the build.
+    const built = new URL("../../packages/server/dist/index.mjs", import.meta.url).href
+    const { serve } = (await import(built)) as typeof import("../../packages/server/src/index.ts")
     server = await serve({ port: 0, data, name: "Sol" })
   })
   after(async () => {
