@@ -1,13 +1,20 @@
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron"
 import type { DesktopCommand } from "@standard-artifacts/protocol"
+import type { Workspace } from "./workspaces"
 
 interface MenuActions {
   readonly newWindow: () => void
   /** Sends a command to a window's page, which owns the tabs. */
   readonly command: (window: BrowserWindow, command: DesktopCommand) => void
+  readonly workspaces: ReadonlyArray<Workspace>
+  /** The workspace the window in front shows, ticked in the menu. */
+  readonly current: string | undefined
+  readonly openWorkspace: (id: string) => void
+  readonly addWorkspace: () => void
 }
 
-export function installMenu({ newWindow, command }: MenuActions) {
+/** Installed again whenever the front window or the workspace list changes, so the tick follows. */
+export function installMenu({ newWindow, command, workspaces, current, openWorkspace, addWorkspace }: MenuActions) {
   const isMac = process.platform === "darwin"
   const send = (next: DesktopCommand) => (_: unknown, window: unknown) => {
     if (window instanceof BrowserWindow) command(window, next)
@@ -20,6 +27,17 @@ export function installMenu({ newWindow, command }: MenuActions) {
       submenu: [
         { label: "New Tab", accelerator: "CmdOrCtrl+T", click: send({ type: "new-tab" }) },
         { label: "New Window", accelerator: "CmdOrCtrl+N", click: () => newWindow() },
+        { type: "separator" },
+        {
+          label: "Workspace",
+          submenu: [
+            ...workspaces.map(
+              (w): MenuItemConstructorOptions => ({ label: w.label, type: "radio", checked: w.id === current, click: () => openWorkspace(w.id) }),
+            ),
+            { type: "separator" },
+            { label: "Add Workspace…", click: () => addWorkspace() },
+          ],
+        },
         { type: "separator" },
         { label: "Close Tab", accelerator: "CmdOrCtrl+W", click: send({ type: "close-tab" }) },
         { label: "Close Window", accelerator: "CmdOrCtrl+Shift+W", role: "close" },

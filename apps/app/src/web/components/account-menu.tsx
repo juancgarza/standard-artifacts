@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { CaretUpDownIcon, CheckIcon, PlusIcon, SignOutIcon, SpinnerGapIcon } from "@phosphor-icons/react"
 import { colorFor, type SessionOrgChoice } from "@standard-artifacts/protocol"
 import { createOrg, listOrgs, signOut, switchOrg, type SignedIn } from "../session"
+import { OtherDesktopWorkspaces, useDesktopWorkspaces } from "./desktop-workspaces"
 import { useDismiss, useEntered } from "./header-popover"
 
 /** Their picture from the account, else their initial on their color. */
@@ -55,6 +56,9 @@ function Menu({ account }: { account: SignedIn }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [naming, setNaming] = useState(false)
+  // In the desktop app: the other places it can switch to, like this computer.
+  const desktop = useDesktopWorkspaces()
+  const onCloud = desktop?.workspaces.find((w) => w.id === desktop.current)?.kind === "cloud"
 
   useEffect(() => {
     let cancelled = false
@@ -95,7 +99,7 @@ function Menu({ account }: { account: SignedIn }) {
         <div className="truncate text-[12px] text-muted">{account.user.email}</div>
       </div>
       <div className="border-t border-border pt-1">
-        <div className="px-2 pt-1 pb-1 text-[12px] font-medium text-faint">Workspaces</div>
+        <div className="px-2 pt-1 pb-1 text-[12px] font-medium text-faint">{onCloud ? "Cloud workspaces" : "Workspaces"}</div>
         <ul aria-busy={!orgs && !error} className="max-h-[240px] overflow-y-auto">
           {shown.map((org) => (
             <li key={org.id}>
@@ -124,11 +128,12 @@ function Menu({ account }: { account: SignedIn }) {
           <NewWorkspace busy={busy === "new"} onCancel={() => setNaming(false)} onCreate={(name) => void go("new", () => createOrg(name))} />
         ) : (
           <button type="button" role="menuitem" onClick={() => setNaming(true)} disabled={busy !== null} className={`${item} text-muted`}>
-            <PlusIcon size={14} className="mx-[3px]" /> New workspace
+            <PlusIcon size={14} className="mx-[3px]" /> {onCloud ? "New Cloud workspace" : "New workspace"}
           </button>
         )}
         {error && <p className="px-2 py-1 text-[12px] text-danger">{error}</p>}
       </div>
+      {desktop && <OtherDesktopWorkspaces list={desktop} />}
       <div className="mt-1 border-t border-border pt-1">
         <button type="button" role="menuitem" onClick={() => void go("out", signOut)} disabled={busy !== null} className={item}>
           <SignOutIcon size={15} className="text-muted" /> Sign out

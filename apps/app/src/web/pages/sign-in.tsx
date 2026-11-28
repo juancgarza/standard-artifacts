@@ -1,4 +1,5 @@
 import { WarningIcon } from "@phosphor-icons/react"
+import { addDesktopWorkspace, useDesktopWorkspaces } from "../components/desktop-workspaces"
 import { signIn } from "../session"
 
 /** The Talavera tile (assets/brand), served as the favicon. */
@@ -13,6 +14,8 @@ function Mark() {
  * button that can only fail.
  */
 export function SignInPage({ problem }: { problem: string | null }) {
+  // In the desktop app, the way to this computer's workspace (or another server) without signing in here.
+  const desktop = useDesktopWorkspaces()
   return (
     <main className="grid min-h-full place-items-center bg-bg px-4 py-10">
       <div className="w-full max-w-[340px]">
@@ -48,6 +51,11 @@ export function SignInPage({ problem }: { problem: string | null }) {
         )}
 
         <p className="mt-6 text-[13px] text-faint">Got a link to a page? Open it directly; it doesn't need an account.</p>
+        {desktop && (
+          <button type="button" onClick={() => void addDesktopWorkspace()} className="mt-3 text-[13px] font-medium text-accent hover:underline">
+            Use a different workspace, like this computer
+          </button>
+        )}
       </div>
     </main>
   )

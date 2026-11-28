@@ -4,7 +4,7 @@
 
 ## Install (preview)
 
-Desktop previews are on [GitHub Releases](https://github.com/juancgarza/standard-artifacts/releases?q=desktop&expanded=true), marked "Desktop preview vX" and pre-release. They connect to Standard Artifacts Cloud (app.standardartifacts.com).
+Desktop previews are on [GitHub Releases](https://github.com/juancgarza/standard-artifacts/releases?q=desktop&expanded=true), marked "Desktop preview vX" and pre-release. They work with Standard Artifacts Cloud (app.standardartifacts.com), the Solo server on your computer, or a server your team hosts: see [Workspaces](#workspaces).
 
 | | File |
 |---|---|
@@ -23,6 +23,20 @@ The previews aren't signed yet, so the OS warns about them once:
 - **Windows.** When SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**.
 
 The app doesn't update itself yet: download new previews from Releases.
+
+## Workspaces
+
+The first launch asks where your work is, and the sidebar and **File → Workspace** switch between them later:
+
+| | Where | Sign-in |
+|---|---|---|
+| **Standard Artifacts Cloud** | the address the build was made for (app.standardartifacts.com) | through your browser, below |
+| **This computer** | `http://localhost:4747`, the Solo server you start with `npx stdartifacts serve` | none |
+| **Another server** | an https address you type in (plain http only on this computer) | whatever that server uses |
+
+Each window shows one workspace, and each workspace has its own session (an Electron partition), so a Cloud sign-in never reaches the local server and switching signs no one out. A window can't change session, so switching opens the workspace in a new window that takes the old one's place, or brings forward a window that already shows it. Cloud's own orgs are still switched by the page, in the account menu. When the local server isn't running, the window says how to start it and connects by itself once it's up.
+
+The list lives in `workspaces.json` in the app's user data. The page can read it and pick an id from it through `window.standardArtifactsDesktop` (`workspaces`, `openWorkspace`, `addWorkspace`), and that's the only thing the page can ask the app for: main.ts answers only the top frame of an app page, and the page never sees or sends an address. Addresses come from the app's own chooser screen, which sends its choices as navigations to `https://desktop.stdartifacts.invalid/…` that the app stops and acts on only when that screen made them. The logic is `apps/desktop/src/workspaces.ts`.
 
 ## Signing in
 

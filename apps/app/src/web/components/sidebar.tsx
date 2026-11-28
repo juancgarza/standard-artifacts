@@ -8,6 +8,7 @@ import { SidebarToggle } from "./sidebar-collapse"
 import { Folders } from "./sidebar-folders"
 import { Row, SectionHeader, useActiveId } from "./sidebar-parts"
 import { AccountMenu } from "./account-menu"
+import { DesktopWorkspaceSwitcher } from "./desktop-workspaces"
 import { signIn } from "../session"
 
 /** Rows per kind section before "See all". */
@@ -204,10 +205,15 @@ function Footer({ onNavigate }: { onNavigate?: () => void }) {
         {account ? (
           <AccountMenu account={account} />
         ) : (
-          <>
-            <div className="grid size-6 place-items-center rounded-full bg-active text-[11px] font-medium">{name.charAt(0)}</div>
-            <div className="min-w-0 flex-1 truncate text-[13px]">{name}</div>
-          </>
+          // No account here (this computer's Solo server, say): in the desktop app, its workspace switcher.
+          <DesktopWorkspaceSwitcher
+            fallback={
+              <>
+                <div className="grid size-6 place-items-center rounded-full bg-active text-[11px] font-medium">{name.charAt(0)}</div>
+                <div className="min-w-0 flex-1 truncate text-[13px]">{name}</div>
+              </>
+            }
+          />
         )}
         <Link
           to="/settings/{-$section}"
