@@ -20,7 +20,7 @@ await build({
   target: "node22",
   format: "cjs",
   external: ["electron"],
-  loader: { ".html": "text" },
+  loader: { ".html": "text", ".svg": "text" },
   outdir: "dist",
   outExtension: { ".js": ".cjs" },
   define: { PACKAGED_APP_URL: JSON.stringify(parsed.origin) },

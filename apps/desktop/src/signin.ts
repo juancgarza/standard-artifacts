@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, session, shell } from "electron"
+import { BrowserWindow, dialog, shell, type Session } from "electron"
 import { browserSignInUrl, destinationOf, isSignOutUrl } from "./links"
 import { newPkce, type Pkce } from "./pkce"
 
@@ -14,6 +14,8 @@ import { newPkce, type Pkce } from "./pkce"
  *
  * Signing out clears everything the app's session kept and ends the AuthKit
  * session in the background, without leaving the window.
+ *
+ * There's one of these per workspace (server), each on that workspace's own session.
  */
 
 /** As long as the server keeps a sign-in open (STATE_MAX_AGE_S). */
@@ -32,11 +34,13 @@ export interface SignIn {
   readonly signOut: (logoutUrl: string) => Promise<void>
   /** Notice the page signing out (POST /api/auth/logout), to clear what the app's session kept. */
   readonly watch: () => void
+  /** When this workspace's sign-in started, while one is open: a callback link belongs to the newest. */
+  readonly pendingSince: () => number | null
 }
 
-export function createSignIn(options: { readonly appOrigin: string; readonly show: (href: string) => void }): SignIn {
-  const { appOrigin, show } = options
-  let pending: (Pkce & { readonly until: number }) | undefined
+export function createSignIn(options: { readonly appOrigin: string; readonly session: Session; readonly show: (href: string) => void }): SignIn {
+  const { appOrigin, session, show } = options
+  let pending: (Pkce & { readonly until: number; readonly since: number }) | undefined
   let signingOutUntil = 0
   let clearing: Promise<void> | undefined
   const live = () => (pending && pending.until > Date.now() ? pending : undefined)
@@ -48,12 +52,12 @@ export function createSignIn(options: { readonly appOrigin: string; readonly sho
   }
 
   /** Everything the page kept: cookies, local storage, caches. The window then starts over. */
-  const clearAll = () => session.defaultSession.clearStorageData().catch(() => {})
+  const clearAll = () => session.clearStorageData().catch(() => {})
 
   return {
     start(loginUrl) {
       // Signing in again while a sign-in is open reuses its verifier, so whichever browser tab finishes still works.
-      const current = live() ?? { ...newPkce(), until: Date.now() + PENDING_FOR_MS }
+      const current = live() ?? { ...newPkce(), until: Date.now() + PENDING_FOR_MS, since: Date.now() }
       pending = current
       void shell.openExternal(browserSignInUrl(loginUrl, appOrigin, current.challenge))
     },
@@ -64,7 +68,7 @@ export function createSignIn(options: { readonly appOrigin: string; readonly sho
       if (!current) return
       let res: Response
       try {
-        res = await session.defaultSession.fetch(new URL("/api/auth/desktop/exchange", appOrigin).toString(), {
+        res = await session.fetch(new URL("/api/auth/desktop/exchange", appOrigin).toString(), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ code, verifier: current.verifier }),
@@ -88,14 +92,14 @@ export function createSignIn(options: { readonly appOrigin: string; readonly sho
     async signOut(logoutUrl) {
       signingOutUntil = 0
       // WorkOS ends the session on this request; where it redirects next doesn't matter.
-      await session.defaultSession.fetch(logoutUrl, { redirect: "manual", cache: "no-store" }).catch(() => undefined)
+      await session.fetch(logoutUrl, { redirect: "manual", cache: "no-store" }).catch(() => undefined)
       await (clearing ?? clearAll())
       clearing = undefined
       show("/")
     },
 
     watch() {
-      session.defaultSession.webRequest.onCompleted({ urls: ["*://*/api/auth/logout"] }, (details) => {
+      session.webRequest.onCompleted({ urls: ["*://*/api/auth/logout"] }, (details) => {
         if (details.method !== "POST" || details.statusCode !== 200 || new URL(details.url).origin !== appOrigin) return
         // The server has cleared its cookies; whatever the page navigates to next starts signed out.
         pending = undefined
@@ -103,5 +107,7 @@ export function createSignIn(options: { readonly appOrigin: string; readonly sho
         clearing = clearAll()
       })
     },
+
+    pendingSince: () => live()?.since ?? null,
   }
 }

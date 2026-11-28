@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" />
+    <title>Choose a workspace</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #ffffff; --text: #1f1f1d; --muted: #73736e; --faint: #9b9b96; --hover: #f4f4f2; --border: #e6e6e3; --accent: #1d3fa6; --danger: #c2410c; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #191918; --text: #ececea; --muted: #9b9b96; --faint: #73736e; --hover: #232322; --border: #2e2e2d; --accent: #8ea6f0; --danger: #f08b52; }
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body { display: grid; place-items: center; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, sans-serif; -webkit-app-region: drag; }
+      main { width: min(440px, 100% - 32px); padding: 24px 0; -webkit-app-region: no-drag; }
+      .mark { width: 44px; height: 44px; display: block; margin-bottom: 18px; }
+      .mark svg { width: 44px; height: 44px; }
+      h1 { margin: 0 0 4px; font: italic 500 26px/1.2 "Iowan Old Style", Charter, Georgia, serif; letter-spacing: -0.01em; }
+      .lede { margin: 0 0 20px; color: var(--muted); }
+      ul { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 8px; }
+      a.ws { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; color: inherit; text-decoration: none; }
+      a.ws:hover, a.ws:focus-visible { background: var(--hover); outline: none; border-color: var(--accent); }
+      a.ws svg { flex: none; width: 22px; height: 22px; color: var(--accent); }
+      .t { flex: 1; min-width: 0; }
+      .t b { display: block; font-weight: 600; }
+      .t span { display: block; color: var(--muted); font-size: 13px; }
+      .t code { font: 12px ui-monospace, Menlo, monospace; }
+      .go { color: var(--faint); }
+      .now { font-size: 12px; color: var(--accent); }
+      form { display: grid; gap: 6px; }
+      label { font-weight: 600; }
+      .row { display: flex; gap: 8px; }
+      input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; }
+      input:focus { outline: none; border-color: var(--accent); }
+      button { height: 34px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+      @media (prefers-color-scheme: dark) { button { color: #10142a; } }
+      .hint { color: var(--muted); font-size: 12.5px; margin: 0; }
+      .error { color: var(--danger); font-size: 13px; margin: 0; }
+      [hidden] { display: none !important; }
+      .back { display: inline-block; margin-top: 22px; color: var(--muted); font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="mark"><!-- mark --></span>
+      <h1>Where's your work?</h1>
+      <p class="lede">Pick a workspace. You can add more and switch between them any time, from the sidebar or File → Workspace.</p>
+      <ul id="list"></ul>
+      <form id="add">
+        <label for="address">Another server</label>
+        <div class="row">
+          <input id="address" name="address" placeholder="artifacts.example.com" autocomplete="off" spellcheck="false" />
+          <button type="submit">Connect</button>
+        </div>
+        <p class="hint">A Standard Artifacts server your team hosts. It needs https, except on this computer.</p>
+        <p class="error" id="error" role="alert" hidden></p>
+      </form>
+      <a class="back" id="back" hidden>← Back</a>
+    </main>
+    <script>
+      // Filled in by main.ts, so each state is its own page (a new #hash alone wouldn't re-run this).
+      const state = /* state */ {}
+      const icons = {
+        cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h10.5a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.4 9.6 4.5 4.5 0 0 0 7 18.5Z"/></svg>',
+        local: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.6"/><path d="M2.5 19h19"/></svg>',
+        server: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="7" rx="1.6"/><rect x="4" y="13" width="16" height="7" rx="1.6"/><path d="M8 7.5h.01M8 16.5h.01"/></svg>',
+      }
+      const blurb = {
+        cloud: "Sign in to your team's workspaces.",
+        local: "Solo, no account. Start it with <code>npx stdartifacts serve</code>.",
+        server: "A server your team hosts.",
+      }
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";")
+      const list = document.getElementById("list")
+      for (const w of state.workspaces || []) {
+        const li = document.createElement("li")
+        const now = w.id === state.current ? '<span class="now">Current</span>' : '<span class="go">→</span>'
+        li.innerHTML =
+          '<a class="ws" href="https://desktop.stdartifacts.invalid/open?workspace=' + encodeURIComponent(w.id) + '">' +
+          (icons[w.kind] || icons.server) +
+          '<span class="t"><b>' + esc(w.label) + "</b><span>" + (w.kind === "server" ? esc(w.detail || "") : blurb[w.kind]) + "</span></span>" + now + "</a>"
+        list.appendChild(li)
+      }
+      if (state.error) {
+        const error = document.getElementById("error")
+        error.textContent = state.error
+        error.hidden = false
+        document.getElementById("address").value = state.address || ""
+      }
+      if (state.current) {
+        const back = document.getElementById("back")
+        back.href = "https://desktop.stdartifacts.invalid/open?workspace=" + encodeURIComponent(state.current)
+        back.hidden = false
+      }
+      document.getElementById("add").addEventListener("submit", (event) => {
+        event.preventDefault()
+        const address = document.getElementById("address").value.trim()
+        if (address) location.href = "https://desktop.stdartifacts.invalid/add?address=" + encodeURIComponent(address)
+      })
+    </script>
+  </body>
+</html>
